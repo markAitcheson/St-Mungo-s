@@ -166,19 +166,26 @@ runs (see "Environment quirk" for the pattern) - not guessed:
   `"Limited Availability {room name} {n} wks from £{price} pp/pw"`.
 - **Canvas Boyce House**: en-suite and studio tiers sit behind a two-way
   toggle (buttons literally labelled "EN SUITE" / "STUDIO") rather than
-  both being in the DOM at once - `scrape_canvas()` now scrapes the default
-  view, clicks the "STUDIO" toggle, and scrapes again. Confirmed via a real
-  run: this correctly returns all 3 studio tiers (Silver £270, Gold £297,
-  Platinum £314), an exact match against Mark's list. The en-suite side
-  only returned 2 of the 4 tiers Mark listed (Bronze £162, Gold £188 - no
-  Silver or Platinum), consistently across two independent live runs on
-  different page loads, which points to those two tiers being genuinely
-  unavailable/sold out right now rather than a scraper bug (the toggle
-  mechanism itself is proven to work, since it found 3/3 on the studio
-  side). Room types that don't currently have a price simply don't appear
-  in that run - this is the same "sold out rooms drop out" behavior the
-  report already relies on elsewhere, not something to chase further
-  unless it recurs with Silver/Platinum permanently absent.
+  both being in the DOM at once - `scrape_canvas()` scrapes the default
+  view, clicks the "STUDIO" toggle, and scrapes again. Room cards use
+  `data-automation="Floor-Room-Card-Title"` / `"...-Description"`
+  (confirmed via a real diagnostic run) - more precise than the earlier
+  generic "any £-containing span" scan, which occasionally snagged
+  unrelated page content. Studio always returns all 3 tiers (Silver £270,
+  Gold £297, Platinum £314). En-suite returns all 4 card slots
+  (Bronze/Silver/Gold/Platinum), but Silver and Platinum's price field
+  reads literally `"SOLD OUT"` instead of a price - confirmed directly (not
+  inferred) via a targeted diagnostic run that dumped the exact card
+  structure: Mark first reported these two as "missing" from a real
+  scheduled run, and this is genuinely why - not a scraper miss. Since
+  showing nothing for a real, named room tier looks exactly like a broken
+  scraper, `scrape_canvas()` now records those two rooms anyway
+  (`price_pw=None`, `offer_text="SOLD OUT"`) and `build_comparison()`
+  (`scraper/compare.py`) surfaces any latest-run room with no price as a
+  status-only row (blank price/deltas, no equivalent-room match) instead of
+  silently dropping it - so the report will show "SILVER EN SUITE - SOLD
+  OUT" rather than nothing at all. If Silver/Platinum come back in stock,
+  they'll pick up real prices automatically on the next run.
 - **St James (Abodus)**: now reliable, with real room-tier names. Previous
   sessions could never get real tier labels and saw the scoped-selector
   flakiness described below; the fix that resolved both problems at once
@@ -235,22 +242,24 @@ share the previous approaches' failure modes.
 
 ## Outstanding / not yet done
 
-1. **Branch mismatch: resolved.** PR #1 merges the new URLs/config/schedule
-   from `claude/script-scheduling-gmt-cyjouw` onto the default branch.
+1. **Branch mismatch: resolved.** Merged via PR #1 onto the default branch.
 2. **Ground-truth room type validation: done.** Mark's room list for St
    Mungo's, Canvas, and Abodus has been checked against real scrape output
    (see "Validation status per site" above) and all three parsers rewritten
    to match. Foundry Courtyard (Prestige) was untouched - Mark confirmed it
    already looked accurate.
-3. **Canvas en-suite Silver/Platinum**: only Bronze and Gold en-suite came
-   back in two independent live runs; Studio came back complete (3/3). Most
-   likely those two tiers are just sold out right now rather than a
-   scraper bug (see "Validation status per site" for the reasoning) - worth
-   a quick recheck in a future run, but not treated as broken.
+3. **Canvas en-suite Silver/Platinum: resolved.** Mark reported these as
+   missing from a real scheduled run after PR #1 merged. Root cause
+   confirmed directly (not inferred): both cards render with a literal
+   "SOLD OUT" price field on Canvas's own page, which `_price_from_text()`
+   correctly failed to parse as a price, so the room silently dropped
+   instead of showing as sold out. Fixed in `scrape_canvas()` and
+   `build_comparison()` - see "Validation status per site" above. Fixed in
+   the follow-up PR after PR #1, not PR #1 itself.
 4. **Gmail/secrets setup**: done and confirmed working end-to-end (real
    email received with .xlsx attached) in an earlier session, before this
-   session's parser fixes - worth a fresh manual trigger once PR #1 is
-   merged to confirm the new per-tier rows render correctly in the actual
+   session's parser fixes - worth a fresh manual trigger to confirm the new
+   per-tier rows and "SOLD OUT" status rows render correctly in the actual
    emailed spreadsheet (this session validated the scrape/compare logic
    directly, not the full emailed report).
 5. **Not started**: "Option B" from earlier discussion - a live workbook in
