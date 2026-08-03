@@ -105,7 +105,9 @@ and 14:00 GMT every day without you doing anything.
   - **"Latest comp set" sheet** - every room type at every property, its
     current price, current offer, % change vs the last report (red = went
     up, green = went down), % change vs the very first price ever recorded,
-    and % vs our own equivalent room type.
+    which St Mungo's room it's closest to in price (e.g. a competitor's
+    "Premium En-suite" might line up with our "En-suite Silver"), and % vs
+    that equivalent room.
   - **"History" sheet** - every price ever recorded, for building your own
     charts/pivot tables (this is the sheet to open with the Claude for Excel
     extension for trend analysis).
@@ -114,20 +116,12 @@ and 14:00 GMT every day without you doing anything.
 
 ## Known limitations (please read)
 
-- **St James (Abodus)**: less reliable than the other sites. Its price
-  ladder loads via a separate call their own page makes after the initial
-  page load, and across several real test runs that call succeeded once
-  (returning 7 room prices) and failed silently the other times (returning
-  none) - waiting longer and scrolling the page didn't change this, so it
-  looks like an intermittent issue on Abodus's own site (possibly rate
-  limiting repeated automated visits) rather than something fixable in the
-  scraper. Expect this property to sometimes show no rows for a given run -
-  that's expected, not a bug, and the run still completes normally for the
-  other four properties. When it does succeed, exact room-type names for
-  each price still couldn't be confirmed from the page structure, so rooms
-  are labelled "Room tier 1" onward (lowest to highest price) rather than
-  their real names - price tracking and % changes are still accurate, only
-  the label is a placeholder.
+- **Canvas (Boyce House) en-suite rooms**: two of the four en-suite tiers
+  (Silver and Platinum) have been missing from recent runs while all three
+  studio tiers came through fine - this looks like those two tiers being
+  genuinely sold out on Canvas's site right now rather than a scraper
+  problem, but if it persists for a long time let me know and I'll take
+  another look.
 - Any competitor can redesign their website at any time, which may break
   its scraper. When that happens the report will show a "SCRAPE ERROR" row
   for that property instead of a wrong price - if you see one, let me know
