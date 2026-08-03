@@ -19,4 +19,4 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run diagnostic scrape
-        run: python scraper/_diag_room_types.py
+        run: python -m scraper._diag_room_types
