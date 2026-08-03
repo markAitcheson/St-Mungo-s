@@ -2,7 +2,7 @@
 
 Twice a day, this repo automatically:
 
-1. Visits St Mungo's own pricing page and four local competitors
+1. Visits St Mungo's own pricing page and three local competitors
 2. Records every room type's price and any live offer
 3. Builds an Excel report comparing today's prices side by side, with the
    % change since the last report and since the very first time each room
@@ -114,12 +114,7 @@ and 14:00 GMT every day without you doing anything.
 
 ## Known limitations (please read)
 
-- **Bridle Works (Collegiate)**: their site doesn't show prices directly -
-  "Book my stay" sends you to a separate booking system (StarRez) that only
-  reveals prices after you search specific dates. This isn't something a
-  simple page visit can capture reliably, so this competitor currently shows
-  up in the report as "N/A - check manually" rather than a guessed price.
-- **St James (Abodus)**: less reliable than the other three sites. Its price
+- **St James (Abodus)**: less reliable than the other sites. Its price
   ladder loads via a separate call their own page makes after the initial
   page load, and across several real test runs that call succeeded once
   (returning 7 room prices) and failed silently the other times (returning

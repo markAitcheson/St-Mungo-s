@@ -73,21 +73,50 @@ README.md            Beginner-friendly GitHub setup instructions for Mark
 
 ## The comp set (as of this session)
 
+Bridle Works (Collegiate) has been **removed** - Mark decided it's too hard
+to scrape reliably (see below) and asked for it to be dropped rather than
+kept as a placeholder row.
+
+Mark has since supplied **room/type-specific URLs** (modal deep-links or
+in-page anchors) in place of the plain overview pages the parsers were
+originally built against:
+
 | Property | URL | is_own | parser key |
 |---|---|---|---|
-| St Mungo's (Student Roost) | https://www.studentroost.co.uk/locations/glasgow/st-mungos | True | `student_roost` |
-| St James (Abodus) | https://abodusstudents.com/accommodation/st-james-glasgow | False | `abodus` |
+| St Mungo's (Student Roost) - En-suite | https://www.studentroost.co.uk/locations/glasgow/st-mungos?modal=rooms-ensuite-st-mungos | True | `student_roost` |
+| St Mungo's (Student Roost) - Studio | https://www.studentroost.co.uk/locations/glasgow/st-mungos?modal=rooms-studio-st-mungos | True | `student_roost` |
+| St James (Abodus) | https://abodusstudents.com/accommodation/st-james-glasgow#the-rooms | False | `abodus` |
 | Foundry Courtyard (Prestige) | https://prestigestudentliving.com/student-accommodation/glasgow/foundry-courtyard | False | `prestige` |
-| Boyce House (Canvas) | https://www.canvas-world.com/en/locations/united-kingdom/glasgow/boyce-house | False | `canvas` |
-| Bridle Works (Collegiate) | https://www.collegiate-ac.com/uk-student-accommodation/glasgow/bridleworks/ | False | `collegiate_unavailable` |
+| Boyce House (Canvas) | https://www.canvas-world.com/en/locations/united-kingdom/glasgow/boyce-house#rooms | False | `canvas` |
 
-These were **overview/listing pages** (one URL per property showing all its
-room types), not per-room-type pages. Mark said he will provide **specific
-room-type URLs** for clearer pricing structure per room type - when he does,
-re-inspect those pages (using the diagnostic-workflow pattern above) before
-assuming the existing parsers still apply; per-room-type pages may have a
-different, possibly simpler/more reliable, DOM structure than the overview
-pages the current selectors were built against.
+**Important - not yet re-validated against these exact URLs.** Only the
+URLs/config were updated so far (config.py + scrape.py + README), per Mark's
+explicit instruction to pause there. The parsers (`scrape_student_roost`,
+`scrape_canvas`) were built and confirmed against the old overview pages, not
+these new ones. Before trusting real output:
+- **St Mungo's**: the `?modal=rooms-ensuite-st-mungos` / `?modal=rooms-studio-st-mungos`
+  query params presumably auto-open a modal for that specific room type on
+  page load. Need to confirm (a) the modal actually opens from a fresh page
+  load with no click needed (Playwright won't click anything), and (b)
+  whether `.roomGroup-card` still matches inside the modal, or whether the
+  background page's cards are still present underneath and would cause
+  double-counting across the two new config rows.
+- **Canvas**: Mark says the en-suite/studio toggle lives on this one page and
+  the `#rooms` anchor doesn't switch it - it likely defaults to one type on
+  load. The current parser walks *all* `£`-containing `<span>` leaves
+  regardless of which toggle state is active, so it may only be capturing
+  whichever type renders by default, silently missing the other. Needs a
+  fresh diagnostic-workflow inspection to check whether both room types are
+  in the DOM at once (hidden via CSS, in which case current parser is fine)
+  or only one is rendered at a time (in which case the scraper needs to
+  trigger the toggle click, which Playwright can do but the current code
+  doesn't).
+- **Abodus**: only the URL gained a `#the-rooms` fragment (same overview
+  page, just a same-page anchor) - the existing flakiness described below is
+  unrelated and still applies.
+
+Use the diagnostic-workflow pattern above to re-inspect before assuming
+anything changed/didn't change.
 
 ## Validation status per site (confirmed via real GitHub Actions runs, not guesses)
 
@@ -104,12 +133,11 @@ pages the current selectors were built against.
   nearest preceding heading (`h1-h5`) for the room type name, e.g. "BRONZE EN
   SUITE" £162, "GOLD EN SUITE" £188.
 - **St James (Abodus)**: unreliable, and *not currently fixed* - see below.
-- **Bridle Works (Collegiate)**: not scraped at all by design. "Book my stay"
-  redirects to a StarRez third-party booking portal
-  (`ukportal.collegiate-ac.com/...`) that only reveals prices after a
-  date-range search - not something a plain page visit can capture. The
-  scraper returns a placeholder row (`room_type: "N/A"`, explanatory
-  `offer_text`) so the gap is visible in the report rather than silent.
+- **Bridle Works (Collegiate)**: no longer scraped - removed from
+  `PROPERTIES` entirely at Mark's request (was previously kept as a
+  placeholder "N/A - check manually" row because "Book my stay" redirects to
+  a StarRez third-party booking portal that only reveals prices after a
+  date-range search; Mark decided that wasn't worth carrying).
 
 ### Open problem: Abodus St James is flaky
 
@@ -157,20 +185,19 @@ placeholder labels.
 - Room types that stop appearing in a run (e.g. sold out) simply drop out of
   that run's comparison rather than showing stale data.
 
-## Outstanding / not yet done (what the user is about to give you)
+## Outstanding / not yet done
 
-1. **Schedule times**: `.github/workflows/comp-set-report.yml` currently has
-   placeholder cron times `0 7 * * *` and `0 18 * * *` (07:00 and 18:00
-   UTC) - Mark has *not* confirmed these, he only knows they're
-   placeholders. Ask what times he actually wants (get local UK time, then
-   convert to UTC - watch for BST vs GMT) and update the two `cron:` lines,
-   plus the comment above them and the README's "Changing the schedule"
-   section if the explanation needs updating.
-2. **Room-type-specific URLs**: Mark said he'll provide these "so we can get
-   a clearer understanding of the pricing structures." When they arrive:
-   re-run the diagnostic-workflow inspection pattern on each new URL before
-   changing any parser - don't assume they share structure with the
-   overview pages already scraped.
+1. **Schedule times**: done. `.github/workflows/comp-set-report.yml` runs at
+   `0 8 * * *` and `0 14 * * *` UTC (08:00/14:00 GMT - Mark confirmed GMT
+   explicitly, and GMT is a fixed UTC+0 offset year-round unlike BST, so no
+   summer/winter adjustment is needed).
+2. **Room-type-specific URLs**: received (see "The comp set" table above) and
+   wired into `scraper/config.py`, replacing the old overview-page URLs.
+   **Not yet re-validated** - re-run the diagnostic-workflow inspection
+   pattern on each new URL before trusting a real run's output. See the
+   per-site notes above (St Mungo's modal-open behaviour and
+   double-counting risk; Canvas's toggle possibly hiding one room type from
+   the current parser).
 3. **Mark still needs to complete his side of setup** (unconfirmed as of
    this note): create a dedicated Gmail account, turn on 2-Step
    Verification, generate an app password, add three repo secrets
