@@ -49,8 +49,10 @@ def append_history(path, new_rows: list[dict]) -> None:
 
 def build_comparison(history_rows: list[dict]) -> list[dict]:
     """One row per (property, room type) as of the latest run, with deltas
-    vs the previous run, vs the first-ever run, and vs our own current price
-    in the same category."""
+    vs the previous run, vs the first-ever run, and vs whichever St Mungo's
+    room in the same category is closest in price right now (the room a
+    prospective tenant would actually be weighing this one against, rather
+    than a same-category average that blurs bronze/gold/platinum together)."""
     series = defaultdict(list)
     for r in history_rows:
         if r.get("price_pw"):
@@ -63,14 +65,13 @@ def build_comparison(history_rows: list[dict]) -> list[dict]:
         return []
     latest_ts = all_ts[-1]
 
-    own_prices_by_category = defaultdict(list)
+    own_rooms_by_category = defaultdict(list)
     for rows in series.values():
         last = rows[-1]
         if last.get("is_own") == "True" and last["run_ts"] == latest_ts:
-            own_prices_by_category[last["category"]].append(float(last["price_pw"]))
-    own_avg_by_category = {
-        cat: sum(vals) / len(vals) for cat, vals in own_prices_by_category.items()
-    }
+            own_rooms_by_category[last["category"]].append(
+                (last["room_type"], float(last["price_pw"]))
+            )
 
     comparison = []
     for (property_id, room_type), rows in series.items():
@@ -91,9 +92,12 @@ def build_comparison(history_rows: list[dict]) -> list[dict]:
         pct_vs_baseline = (delta_vs_baseline / baseline_price) * 100 if baseline_price else None
 
         vs_own_pct = None
+        equivalent_room = None
         is_own = last.get("is_own") == "True"
-        if not is_own and category in own_avg_by_category:
-            own_price = own_avg_by_category[category]
+        if not is_own and own_rooms_by_category.get(category):
+            equivalent_room, own_price = min(
+                own_rooms_by_category[category], key=lambda room: abs(room[1] - price)
+            )
             vs_own_pct = ((price - own_price) / own_price) * 100 if own_price else None
 
         comparison.append({
@@ -108,6 +112,7 @@ def build_comparison(history_rows: list[dict]) -> list[dict]:
             "pct_vs_prev": pct_vs_prev,
             "delta_vs_baseline": delta_vs_baseline,
             "pct_vs_baseline": pct_vs_baseline,
+            "equivalent_room": equivalent_room,
             "vs_own_pct": vs_own_pct,
             "run_ts": last["run_ts"],
         })

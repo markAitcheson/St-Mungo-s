@@ -35,7 +35,7 @@ def build_excel(comparison: list[dict], history: list[dict], path) -> None:
     ws.title = "Latest comp set"
     headers = [
         "Property", "Room type", "Category", "Price (pw)", "Current offer",
-        "vs last report", "vs baseline", "vs St Mungo's",
+        "vs last report", "vs baseline", "Equivalent St Mungo's room", "vs St Mungo's",
     ]
     ws.append(headers)
     _style_header(ws)
@@ -50,15 +50,16 @@ def build_excel(comparison: list[dict], history: list[dict], path) -> None:
             r["offer_text"],
             _pct(r["pct_vs_prev"]),
             _pct(r["pct_vs_baseline"]),
+            "-" if r["is_own"] else (r.get("equivalent_room") or ""),
             "-" if r["is_own"] else _pct(r["vs_own_pct"]),
         ])
         excel_row = ws.max_row
-        for col, key in ((6, "pct_vs_prev"), (7, "pct_vs_baseline"), (8, "vs_own_pct")):
+        for col, key in ((6, "pct_vs_prev"), (7, "pct_vs_baseline"), (9, "vs_own_pct")):
             val = r.get(key)
             if val:
                 ws.cell(row=excel_row, column=col).font = UP_FONT if val > 0 else DOWN_FONT
 
-    widths = [30, 32, 12, 12, 42, 16, 16, 16]
+    widths = [30, 32, 12, 12, 42, 16, 16, 30, 16]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = "A2"
