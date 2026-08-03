@@ -13,6 +13,20 @@ HISTORY_COLUMNS = [
     "category", "price_pw", "offer_text", "raw_text", "source_url",
 ]
 
+# Common student-accommodation tier ladder, low to high, shared by St Mungo's
+# and several competitors (Canvas, Prestige) - lets us match a competitor's
+# room to our own tier of the *same name* rather than by price.
+TIER_LADDER = ["bronze", "silver", "gold", "platinum"]
+
+
+def tier_keyword(room_type: str) -> str | None:
+    """The named tier (e.g. "bronze") a room type belongs to, if it names one."""
+    t = room_type.lower()
+    for kw in TIER_LADDER:
+        if kw in t:
+            return kw
+    return None
+
 
 def categorize(room_type: str) -> str:
     """Best-effort room category from a free-text room type name, so prices
@@ -50,9 +64,18 @@ def append_history(path, new_rows: list[dict]) -> None:
 def build_comparison(history_rows: list[dict]) -> list[dict]:
     """One row per (property, room type) as of the latest run, with deltas
     vs the previous run, vs the first-ever run, and vs whichever St Mungo's
-    room in the same category is closest in price right now (the room a
-    prospective tenant would actually be weighing this one against, rather
-    than a same-category average that blurs bronze/gold/platinum together)."""
+    room in the same category is the equivalent tier (the room a prospective
+    tenant would actually be weighing this one against, rather than a
+    same-category average that blurs bronze/gold/platinum together).
+
+    The equivalent room is chosen by name or hierarchy position, never by
+    price: if the competitor's room names a known tier (bronze/silver/gold/
+    platinum) we match our own room of that same tier; otherwise we fall
+    back to the room's ordinal position within that competitor's own
+    category (e.g. the 2nd of 4 tiers listed) mapped onto the equivalent
+    position among our own tiers, since competitors like Abodus use their
+    own tier names (Classic/Premium/Superior/Deluxe) in their own listing
+    order rather than the shared bronze-to-platinum ladder."""
     series = defaultdict(list)
     for r in history_rows:
         if r.get("price_pw"):
@@ -65,13 +88,49 @@ def build_comparison(history_rows: list[dict]) -> list[dict]:
         return []
     latest_ts = all_ts[-1]
 
-    own_rooms_by_category = defaultdict(list)
+    # Own tiers per category, ordered low-to-high by the shared tier ladder
+    # (an unnamed tier, e.g. St Mungo's plain "Studio", sits just above
+    # "bronze" - the entry-level default above the named economy tier).
+    own_rooms_raw = defaultdict(list)
     for rows in series.values():
         last = rows[-1]
         if last.get("is_own") == "True" and last["run_ts"] == latest_ts:
-            own_rooms_by_category[last["category"]].append(
+            own_rooms_raw[last["category"]].append(
                 (last["room_type"], float(last["price_pw"]))
             )
+    own_rooms_by_category = {}
+    for category, rooms in own_rooms_raw.items():
+        def ladder_rank(room, _ladder=TIER_LADDER):
+            kw = tier_keyword(room[0])
+            return _ladder.index(kw) if kw else 0.5
+        own_rooms_by_category[category] = sorted(rooms, key=ladder_rank)
+
+    # Order competitor rooms appeared in the latest run, per property+
+    # category - their own natural (lowest-to-highest tier) listing order,
+    # used as a hierarchy "position" when no tier name is shared with ours.
+    competitor_order = defaultdict(list)
+    for r in history_rows:
+        if r["run_ts"] == latest_ts and r.get("is_own") != "True":
+            key = (r["property_id"], r["category"])
+            if r["room_type"] not in competitor_order[key]:
+                competitor_order[key].append(r["room_type"])
+
+    def find_equivalent(property_id, room_type, category):
+        own_list = own_rooms_by_category.get(category)
+        if not own_list:
+            return None
+        kw = tier_keyword(room_type)
+        if kw:
+            for name, price in own_list:
+                if tier_keyword(name) == kw:
+                    return name, price
+        order = competitor_order.get((property_id, category), [])
+        if room_type not in order:
+            return own_list[0]
+        idx = order.index(room_type)
+        frac = idx / (len(order) - 1) if len(order) > 1 else 0.5
+        target = round(frac * (len(own_list) - 1))
+        return own_list[target]
 
     comparison = []
     for (property_id, room_type), rows in series.items():
@@ -94,11 +153,11 @@ def build_comparison(history_rows: list[dict]) -> list[dict]:
         vs_own_pct = None
         equivalent_room = None
         is_own = last.get("is_own") == "True"
-        if not is_own and own_rooms_by_category.get(category):
-            equivalent_room, own_price = min(
-                own_rooms_by_category[category], key=lambda room: abs(room[1] - price)
-            )
-            vs_own_pct = ((price - own_price) / own_price) * 100 if own_price else None
+        if not is_own:
+            match = find_equivalent(property_id, room_type, category)
+            if match:
+                equivalent_room, own_price = match
+                vs_own_pct = ((price - own_price) / own_price) * 100 if own_price else None
 
         comparison.append({
             "property_id": property_id,
