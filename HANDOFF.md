@@ -12,10 +12,15 @@ twice a day, scrape local competitors' room pricing, compare it to St
 Mungo's own pricing, and get a report showing side-by-side prices, % change
 since the last report, and % change since the first-ever recorded price.
 
-Repo: **markAitcheson/St-Mungo-s**, branch
-`claude/student-accommodation-access-5v5j44` (this branch is also currently
-the repo's *default* branch, which matters - GitHub Actions `schedule`
-triggers only ever fire from whatever branch is set as default).
+Repo: **markAitcheson/St-Mungo-s**. Default branch is
+`claude/student-accommodation-access-5v5j44` (this matters - GitHub Actions
+`schedule` triggers, and `workflow_dispatch` *registration* (see below),
+only ever work from whatever branch is set as default).
+
+**This session's work happened on a different branch,
+`claude/script-scheduling-gmt-cyjouw`, and has NOT been merged into the
+default branch yet** - see "⚠️ Branch mismatch" below, this is the most
+important thing to read before doing anything else.
 
 ## Decisions already made (don't re-litigate these without reason)
 
@@ -70,6 +75,48 @@ requirements.txt     playwright, openpyxl
 data/history.csv, data/latest_comp_set.xlsx   Committed by the workflow each run
 README.md            Beginner-friendly GitHub setup instructions for Mark
 ```
+
+## ⚠️ Branch mismatch - read this first
+
+All of this session's changes (new room-type-specific URLs, Bridle Works
+removal, schedule change to 08:00/14:00 GMT) were committed to
+`claude/script-scheduling-gmt-cyjouw`, which is **not** the default branch.
+The default branch (`claude/student-accommodation-access-5v5j44`) still has
+the *old* code: old single overview URL for St Mungo's, Bridle Works still
+present, old 07:00/18:00 UTC schedule.
+
+Mark manually triggered the real "Glasgow comp set report" workflow to
+verify end-to-end delivery (Gmail secrets are now configured and working -
+he received a real email with the .xlsx attached). That run executed on the
+**default branch**, i.e. against the **old** code, not the new URLs from
+this session. Concretely, confirmed from `data/history.csv` on the default
+branch (run at `2026-08-03T17:44:22+00:00`):
+- St Mungo's (own): both En-suite (£179) and Studio (£209) captured fine.
+- Foundry Courtyard (Prestige): 8 room types captured, looks complete.
+- **St James (Abodus): missing entirely from this run** (zero rows) -
+  consistent with the pre-existing documented flakiness below, not a new
+  issue.
+- **Canvas (Boyce House): only 2 rows, both En-suite** ("BRONZE EN SUITE"
+  £162, "GOLD EN SUITE" £188) - **no Studio rooms at all**. This confirms
+  the toggle-hiding risk flagged in this file previously: the old overview
+  page apparently only exposes one room type (En-suite) in the DOM by
+  default, and Studio isn't being captured.
+- Bridle Works: still present as a placeholder row (old code never removed
+  it - that removal only exists on the other branch).
+
+So: **the "missing room types" Mark observed are from the OLD scraper/URLs,
+not yet a verdict on this session's new modal/anchor URLs**, which still
+haven't been tested at all. Mark said he will manually supply the complete,
+correct list of room types per property in the next session, to use as
+ground truth.
+
+**Before anything else, the next session needs to either:**
+1. Merge/fast-forward `claude/script-scheduling-gmt-cyjouw` into the
+   default branch (or change which branch is default) so the new URLs and
+   Bridle-Works removal actually take effect on scheduled/dispatched runs, then
+2. Re-run and compare against Mark's manually-supplied ground-truth room
+   type list, fixing the Canvas parser (confirmed missing Studio) and
+   revisiting Abodus and the new St Mungo's modal URLs per the notes below.
 
 ## The comp set (as of this session)
 
@@ -187,25 +234,38 @@ placeholder labels.
 
 ## Outstanding / not yet done
 
-1. **Schedule times**: done. `.github/workflows/comp-set-report.yml` runs at
-   `0 8 * * *` and `0 14 * * *` UTC (08:00/14:00 GMT - Mark confirmed GMT
-   explicitly, and GMT is a fixed UTC+0 offset year-round unlike BST, so no
-   summer/winter adjustment is needed).
-2. **Room-type-specific URLs**: received (see "The comp set" table above) and
-   wired into `scraper/config.py`, replacing the old overview-page URLs.
-   **Not yet re-validated** - re-run the diagnostic-workflow inspection
-   pattern on each new URL before trusting a real run's output. See the
-   per-site notes above (St Mungo's modal-open behaviour and
-   double-counting risk; Canvas's toggle possibly hiding one room type from
-   the current parser).
-3. **Mark still needs to complete his side of setup** (unconfirmed as of
-   this note): create a dedicated Gmail account, turn on 2-Step
-   Verification, generate an app password, add three repo secrets
-   (`REPORT_EMAIL_FROM`, `REPORT_EMAIL_APP_PASSWORD`, `REPORT_EMAIL_TO`),
-   then manually trigger the workflow once via the Actions tab to confirm a
-   real email arrives. Full step-by-step is in README.md - point him there
-   rather than re-explaining inline unless he's stuck on a specific step.
-4. **Not started**: "Option B" from earlier discussion - a live workbook in
+1. **Branch mismatch (top priority)**: see "⚠️ Branch mismatch" section
+   above. This session's URL/config changes are stranded on
+   `claude/script-scheduling-gmt-cyjouw` and have not reached the default
+   branch that actually runs on schedule/dispatch.
+2. **Mark is providing ground-truth room type data manually** in the next
+   session (his words: "I will provide all room types manually in the next
+   chat context") - wait for that rather than guessing. Use it to check
+   against real scrape output once running on the correct (merged) branch.
+3. **Canvas parser needs fixing**: confirmed (not just theoretical) to be
+   missing Studio rooms - only En-suite came back in the real run above.
+   Needs a fresh diagnostic-workflow inspection of the live page to see
+   whether Studio cards are in the DOM but hidden (fixable by adjusting the
+   selector) or only rendered after a toggle click (needs Playwright to
+   click it).
+4. **Abodus still flaky**: missing entirely in the latest real run, matching
+   prior sessions' findings. Not yet fixed - see "Open problem" section
+   above. Once the branch mismatch is resolved, worth trying the new
+   `#the-rooms`-anchored URL fresh in case Mark's supplied ground truth
+   suggests a different endpoint/approach.
+5. **St Mungo's new modal URLs** (`?modal=rooms-ensuite-st-mungos` /
+   `?modal=rooms-studio-st-mungos`): still completely untested (old run
+   above used the old single overview URL, which happened to work fine).
+   Re-validate once on the correct branch - see risks noted in "The comp
+   set" section above (modal may not auto-open without a click; background
+   page cards could cause double-counting across the two new config rows).
+6. **Schedule times**: done, not blocked by the above.
+   `.github/workflows/comp-set-report.yml` runs at `0 8 * * *` and
+   `0 14 * * *` UTC (08:00/14:00 GMT) on `claude/script-scheduling-gmt-cyjouw`
+   - will take effect once that branch reaches the default branch.
+7. **Gmail/secrets setup**: done and confirmed working end-to-end (real
+   email received with .xlsx attached), on the default branch's old code.
+8. **Not started**: "Option B" from earlier discussion - a live workbook in
    OneDrive updated in place via Microsoft Graph API, instead of a
    committed file per run. Only worth revisiting if Mark asks for it later;
    requires an Azure app registration, more setup than the current
