@@ -1,5 +1,11 @@
 """Entry point run twice daily by .github/workflows/comp-set-report.yml:
-scrape every property, append to history, rebuild the report, email it."""
+scrape every property, append to history, rebuild the report, email it.
+
+If the email step fails (bad credentials, Gmail outage), the scraped data
+and rebuilt report are still committed - see the "Commit updated data" step
+in the workflow, which runs even if this script exits non-zero, so a bad
+send never loses a scrape. The run still shows red in Actions so it's not
+silently swallowed."""
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,9 +42,13 @@ def main():
     history = load_history(HISTORY_PATH)
     comparison = build_comparison(history)
     build_excel(comparison, history, REPORT_PATH)
-    send_report_email(REPORT_PATH, comparison, run_ts)
+    print(f"Scraped and built report: {len(rows)} rows scraped, {len(comparison)} in latest comparison.")
 
-    print(f"Run complete: {len(rows)} rows scraped, {len(comparison)} in latest comparison.")
+    try:
+        send_report_email(REPORT_PATH, comparison, run_ts)
+    except Exception:
+        print("Email send failed - data was still scraped and the report rebuilt; see traceback below.")
+        raise
 
 
 if __name__ == "__main__":
