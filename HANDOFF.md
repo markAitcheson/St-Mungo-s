@@ -17,10 +17,10 @@ Repo: **markAitcheson/St-Mungo-s**. Default branch is
 `schedule` triggers, and `workflow_dispatch` *registration* (see below),
 only ever work from whatever branch is set as default).
 
-**This session's work happened on a different branch,
-`claude/script-scheduling-gmt-cyjouw`, and has NOT been merged into the
-default branch yet** - see "⚠️ Branch mismatch" below, this is the most
-important thing to read before doing anything else.
+A prior session's work happened on a different branch,
+`claude/script-scheduling-gmt-cyjouw`, and had not been merged into the
+default branch - see "Branch mismatch (resolved)" below for what that was
+and how it was fixed.
 
 ## Decisions already made (don't re-litigate these without reason)
 
@@ -76,21 +76,22 @@ data/history.csv, data/latest_comp_set.xlsx   Committed by the workflow each run
 README.md            Beginner-friendly GitHub setup instructions for Mark
 ```
 
-## ⚠️ Branch mismatch - read this first
+## Branch mismatch (resolved)
 
-All of this session's changes (new room-type-specific URLs, Bridle Works
+A prior session's changes (new room-type-specific URLs, Bridle Works
 removal, schedule change to 08:00/14:00 GMT) were committed to
-`claude/script-scheduling-gmt-cyjouw`, which is **not** the default branch.
-The default branch (`claude/student-accommodation-access-5v5j44`) still has
-the *old* code: old single overview URL for St Mungo's, Bridle Works still
-present, old 07:00/18:00 UTC schedule.
+`claude/script-scheduling-gmt-cyjouw` instead of the default branch
+(`claude/student-accommodation-access-5v5j44`), so none of it took effect
+on scheduled/dispatched runs - the default branch kept running the *old*
+code: old single overview URL for St Mungo's, Bridle Works still present,
+old 07:00/18:00 UTC schedule.
 
-Mark manually triggered the real "Glasgow comp set report" workflow to
-verify end-to-end delivery (Gmail secrets are now configured and working -
-he received a real email with the .xlsx attached). That run executed on the
-**default branch**, i.e. against the **old** code, not the new URLs from
-this session. Concretely, confirmed from `data/history.csv` on the default
-branch (run at `2026-08-03T17:44:22+00:00`):
+Before the fix, Mark manually triggered the real "Glasgow comp set report"
+workflow to verify end-to-end delivery (Gmail secrets are now configured
+and working - he received a real email with the .xlsx attached). That run
+executed on the **default branch**, i.e. against the **old** code, not the
+new URLs from the other session. Concretely, confirmed from
+`data/history.csv` on the default branch (run at `2026-08-03T17:44:22+00:00`):
 - St Mungo's (own): both En-suite (£179) and Studio (£209) captured fine.
 - Foundry Courtyard (Prestige): 8 room types captured, looks complete.
 - **St James (Abodus): missing entirely from this run** (zero rows) -
@@ -102,21 +103,27 @@ branch (run at `2026-08-03T17:44:22+00:00`):
   page apparently only exposes one room type (En-suite) in the DOM by
   default, and Studio isn't being captured.
 - Bridle Works: still present as a placeholder row (old code never removed
-  it - that removal only exists on the other branch).
+  it - that removal only existed on the other branch).
 
-So: **the "missing room types" Mark observed are from the OLD scraper/URLs,
-not yet a verdict on this session's new modal/anchor URLs**, which still
-haven't been tested at all. Mark said he will manually supply the complete,
-correct list of room types per property in the next session, to use as
-ground truth.
+So: **the "missing room types" Mark observed were from the OLD
+scraper/URLs**, not a verdict on the new modal/anchor URLs, which were
+still untested at the time. Mark said he would manually supply the
+complete, correct list of room types per property, to use as ground truth.
 
-**Before anything else, the next session needs to either:**
-1. Merge/fast-forward `claude/script-scheduling-gmt-cyjouw` into the
-   default branch (or change which branch is default) so the new URLs and
-   Bridle-Works removal actually take effect on scheduled/dispatched runs, then
-2. Re-run and compare against Mark's manually-supplied ground-truth room
-   type list, fixing the Canvas parser (confirmed missing Studio) and
-   revisiting Abodus and the new St Mungo's modal URLs per the notes below.
+**Fix applied**: `claude/script-scheduling-gmt-cyjouw` was merged into a
+branch based on the current default branch (bringing in the new URLs,
+Bridle Works removal, and 08:00/14:00 GMT schedule), and the throwaway
+`_diag-st-mungos` diagnostic workflow/script from that branch was deleted
+before merging (it was only needed for one-off inspection, not for
+production). That merge is the PR this HANDOFF update ships with - once
+it's merged into `claude/student-accommodation-access-5v5j44`, the default
+branch will actually run the new code on schedule/dispatch.
+
+**Next session still needs to**: re-run and compare against Mark's
+manually-supplied ground-truth room type list, fixing the Canvas parser
+(confirmed missing Studio) and revisiting Abodus and the new St Mungo's
+modal URLs per the notes below - none of that behavioral validation was
+in scope for the branch-mismatch fix itself.
 
 ## The comp set (as of this session)
 
@@ -234,10 +241,9 @@ placeholder labels.
 
 ## Outstanding / not yet done
 
-1. **Branch mismatch (top priority)**: see "⚠️ Branch mismatch" section
-   above. This session's URL/config changes are stranded on
-   `claude/script-scheduling-gmt-cyjouw` and have not reached the default
-   branch that actually runs on schedule/dispatch.
+1. **Branch mismatch: resolved** - see "Branch mismatch (resolved)" section
+   above. Once the merge PR lands on `claude/student-accommodation-access-5v5j44`,
+   the default branch runs the new URLs/config on schedule/dispatch.
 2. **Mark is providing ground-truth room type data manually** in the next
    session (his words: "I will provide all room types manually in the next
    chat context") - wait for that rather than guessing. Use it to check
@@ -250,19 +256,19 @@ placeholder labels.
    click it).
 4. **Abodus still flaky**: missing entirely in the latest real run, matching
    prior sessions' findings. Not yet fixed - see "Open problem" section
-   above. Once the branch mismatch is resolved, worth trying the new
+   above. Now that the branch mismatch is resolved, worth trying the new
    `#the-rooms`-anchored URL fresh in case Mark's supplied ground truth
    suggests a different endpoint/approach.
 5. **St Mungo's new modal URLs** (`?modal=rooms-ensuite-st-mungos` /
    `?modal=rooms-studio-st-mungos`): still completely untested (old run
    above used the old single overview URL, which happened to work fine).
-   Re-validate once on the correct branch - see risks noted in "The comp
-   set" section above (modal may not auto-open without a click; background
-   page cards could cause double-counting across the two new config rows).
-6. **Schedule times**: done, not blocked by the above.
-   `.github/workflows/comp-set-report.yml` runs at `0 8 * * *` and
-   `0 14 * * *` UTC (08:00/14:00 GMT) on `claude/script-scheduling-gmt-cyjouw`
-   - will take effect once that branch reaches the default branch.
+   Re-validate now that the merge PR lands them on the default branch - see
+   risks noted in "The comp set" section above (modal may not auto-open
+   without a click; background page cards could cause double-counting
+   across the two new config rows).
+6. **Schedule times**: done. `.github/workflows/comp-set-report.yml` runs
+   at `0 8 * * *` and `0 14 * * *` UTC (08:00/14:00 GMT) - now merged onto
+   the default branch, so this takes effect once the merge PR lands.
 7. **Gmail/secrets setup**: done and confirmed working end-to-end (real
    email received with .xlsx attached), on the default branch's old code.
 8. **Not started**: "Option B" from earlier discussion - a live workbook in
