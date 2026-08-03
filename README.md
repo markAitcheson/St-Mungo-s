@@ -105,9 +105,12 @@ and 14:00 GMT every day without you doing anything.
   - **"Latest comp set" sheet** - every room type at every property, its
     current price, current offer, % change vs the last report (red = went
     up, green = went down), % change vs the very first price ever recorded,
-    which St Mungo's room it's closest to in price (e.g. a competitor's
-    "Premium En-suite" might line up with our "En-suite Silver"), and % vs
-    that equivalent room.
+    which St Mungo's room it's the equivalent tier to (matched by shared
+    tier name, e.g. a competitor's "Silver Ensuite" lines up with our
+    "En-suite silver", or by hierarchy position when the names don't match,
+    e.g. Abodus's "Premium En-suite" among its own tiers - never by price),
+    and % vs that equivalent room (red = priced below St Mungo's, green =
+    priced above, since these are competitors).
   - **"History" sheet** - every price ever recorded, for building your own
     charts/pivot tables (this is the sheet to open with the Claude for Excel
     extension for trend analysis).

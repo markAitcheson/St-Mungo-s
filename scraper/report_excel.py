@@ -54,10 +54,17 @@ def build_excel(comparison: list[dict], history: list[dict], path) -> None:
             "-" if r["is_own"] else _pct(r["vs_own_pct"]),
         ])
         excel_row = ws.max_row
-        for col, key in ((6, "pct_vs_prev"), (7, "pct_vs_baseline"), (9, "vs_own_pct")):
+        for col, key in ((6, "pct_vs_prev"), (7, "pct_vs_baseline")):
             val = r.get(key)
             if val:
                 ws.cell(row=excel_row, column=col).font = UP_FONT if val > 0 else DOWN_FONT
+
+        # vs St Mungo's is a competitor comparison, not our own price trend -
+        # red = priced below us (bad for us), green = priced above us (good
+        # for us), the opposite sense to the trend columns above.
+        vs_own = r.get("vs_own_pct")
+        if vs_own:
+            ws.cell(row=excel_row, column=9).font = UP_FONT if vs_own < 0 else DOWN_FONT
 
     widths = [30, 32, 12, 12, 42, 16, 16, 30, 16]
     for i, w in enumerate(widths, start=1):
