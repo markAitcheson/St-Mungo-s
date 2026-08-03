@@ -1,7 +1,9 @@
 """
-One-off diagnostic script: renders each target page in a real browser (via
-GitHub Actions, which has normal internet access) and prints every element
-containing a '£' price, its tag/class chain, and the nearest heading text.
+One-off diagnostic script (v2): renders each target page in a real browser
+(via GitHub Actions, which has normal internet access) and prints every
+element containing a '£' price, along with the full text of its nearest
+"card-like" ancestor container (so room type name + price + offer text stay
+together), plus any iframes found on the page.
 
 This is NOT part of the production pipeline - it exists purely so we can see
 real page structure and write accurate selectors for scrape.py. Safe to
@@ -12,9 +14,7 @@ from playwright.sync_api import sync_playwright
 
 URLS = {
     "student_roost_st_mungos": "https://www.studentroost.co.uk/locations/glasgow/st-mungos",
-    "abodus_st_james": "https://abodusstudents.com/accommodation/st-james-glasgow",
     "prestige_foundry_courtyard": "https://prestigestudentliving.com/student-accommodation/glasgow/foundry-courtyard",
-    "canvas_boyce_house": "https://www.canvas-world.com/en/locations/united-kingdom/glasgow/boyce-house",
     "collegiate_bridleworks": "https://www.collegiate-ac.com/uk-student-accommodation/glasgow/bridleworks/",
 }
 
@@ -32,36 +32,44 @@ JS_EXTRACT = """
   while ((node = walker.nextNode()) && count < 60) {
     const text = node.nodeValue;
     if (text && text.includes('£')) {
-      const el = node.parentElement;
+      let el = node.parentElement;
       if (!el) continue;
-      const chain = [];
+      // walk up to find a "card-like" container: has a class hinting at
+      // room/plan/rate/card, or is simply 3-5 levels up with substantial text
       let cur = el;
-      for (let i = 0; i < 4 && cur; i++) {
-        chain.push({
-          tag: cur.tagName,
-          cls: cur.className ? String(cur.className).slice(0, 100) : '',
-          id: cur.id || ''
-        });
+      let cardEl = null;
+      for (let i = 0; i < 6 && cur; i++) {
+        const cls = cur.className ? String(cur.className) : '';
+        if (/card|room|unit|plan|rate|tariff|product|listing/i.test(cls)) {
+          cardEl = cur;
+          break;
+        }
         cur = cur.parentElement;
       }
-      let heading = '';
-      let node2 = el;
-      outer:
-      for (let up = 0; up < 6 && node2; up++) {
-        let sib = node2.previousElementSibling;
-        while (sib) {
-          if (/^H[1-6]$/.test(sib.tagName)) { heading = sib.innerText.slice(0, 120); break outer; }
-          const h = sib.querySelector && sib.querySelector('h1,h2,h3,h4,h5');
-          if (h) { heading = h.innerText.slice(0, 120); break outer; }
-          sib = sib.previousElementSibling;
-        }
-        node2 = node2.parentElement;
+      if (!cardEl) {
+        // fallback: go up 3 levels
+        cardEl = el;
+        for (let i = 0; i < 3 && cardEl.parentElement; i++) cardEl = cardEl.parentElement;
       }
-      results.push({ text: text.trim().slice(0, 200), tag: el.tagName, cls: el.className ? String(el.className).slice(0, 120) : '', chain, heading });
+      results.push({
+        priceText: text.trim().slice(0, 100),
+        cardTag: cardEl.tagName,
+        cardCls: cardEl.className ? String(cardEl.className).slice(0, 150) : '',
+        cardText: cardEl.innerText ? cardEl.innerText.replace(/\\s+/g, ' ').slice(0, 400) : ''
+      });
       count++;
     }
   }
-  return results;
+  // also report any iframes (booking widgets often live in a separate domain)
+  const iframes = Array.from(document.querySelectorAll('iframe')).map(f => ({
+    src: f.src, id: f.id, cls: f.className ? String(f.className).slice(0,100) : ''
+  }));
+  // also report clickable tab/nav labels that might reveal a "Rooms" section
+  const tabLike = Array.from(document.querySelectorAll('a,button,[role=tab]'))
+    .map(el => el.innerText && el.innerText.trim())
+    .filter(t => t && /room|price|book|rate|availability/i.test(t))
+    .slice(0, 20);
+  return { matches: results, iframes, tabLike };
 }
 """
 
@@ -72,13 +80,15 @@ def inspect(name, url):
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page(user_agent=USER_AGENT)
-            page.goto(url, timeout=45000, wait_until="networkidle")
-            page.wait_for_timeout(3000)
-            matches = page.evaluate(JS_EXTRACT)
+            page.goto(url, timeout=60000, wait_until="load")
+            page.wait_for_timeout(6000)
+            data = page.evaluate(JS_EXTRACT)
             out["status"] = "ok"
             out["title"] = page.title()
-            out["price_matches_count"] = len(matches)
-            out["matches"] = matches
+            out["price_matches_count"] = len(data["matches"])
+            out["matches"] = data["matches"]
+            out["iframes"] = data["iframes"]
+            out["tabLike"] = data["tabLike"]
             browser.close()
     except Exception as e:
         out["status"] = "error"
