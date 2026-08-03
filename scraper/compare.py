@@ -116,4 +116,33 @@ def build_comparison(history_rows: list[dict]) -> list[dict]:
             "vs_own_pct": vs_own_pct,
             "run_ts": last["run_ts"],
         })
+
+    # Rooms present in the latest run but with no price (e.g. Canvas tiers
+    # that show "SOLD OUT" instead of a price) would otherwise disappear
+    # entirely, which reads as a scraper miss rather than what it is - still
+    # surface them, just with no price/deltas to show.
+    seen_keys = {(r["property_id"], r["room_type"]) for r in comparison}
+    for r in history_rows:
+        if r["run_ts"] != latest_ts or r.get("price_pw"):
+            continue
+        key = (r["property_id"], r["room_type"])
+        if key in seen_keys or r["room_type"] == "SCRAPE ERROR":
+            continue
+        seen_keys.add(key)
+        comparison.append({
+            "property_id": r["property_id"],
+            "property_name": r["property_name"],
+            "is_own": r.get("is_own") == "True",
+            "room_type": r["room_type"],
+            "category": r["category"],
+            "price_pw": None,
+            "offer_text": r.get("offer_text", ""),
+            "delta_vs_prev": None,
+            "pct_vs_prev": None,
+            "delta_vs_baseline": None,
+            "pct_vs_baseline": None,
+            "equivalent_room": None,
+            "vs_own_pct": None,
+            "run_ts": r["run_ts"],
+        })
     return comparison

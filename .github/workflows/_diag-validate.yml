@@ -1,4 +1,4 @@
-name: Diagnostic - Canvas missing en-suite tiers
+name: Diagnostic - validate Canvas sold-out fix end-to-end
 
 on:
   workflow_dispatch: {}
@@ -19,4 +19,4 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Run diagnostic scrape
-        run: python -m scraper._diag_canvas
+        run: python -m scraper._diag_validate
