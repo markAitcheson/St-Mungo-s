@@ -1,12 +1,10 @@
-"""Throwaway diagnostic: Canvas Boyce House keeps returning only 2 of 4
-en-suite tiers (Bronze, Gold - never Silver, Platinum) across 3 independent
-real runs, while the studio side (reached via clicking the "STUDIO" toggle)
-returns all 3 tiers cleanly. Investigate whether Silver/Platinum en-suite
-are: (a) genuinely absent from the page right now, (b) present but need a
-second interaction beyond the EN SUITE/STUDIO toggle (e.g. a carousel/
-pagination control), or (c) present in the DOM but filtered out by the
-current selector for some reason. Not part of the pipeline - delete after
-use."""
+"""Throwaway diagnostic v2: use the confirmed real card structure
+(h4[data-automation="Floor-Room-Card-Title"] for room name,
+span[data-automation="Floor-Room-Card-Description"] for the "Prices from
+£X per week" text) instead of a generic price-leaf-element scan, to get an
+exact, unambiguous count of room cards on both toggle states. v1's generic
+scan snagged a giant non-price HTML blob and was unusable. Not part of the
+pipeline - delete after use."""
 import json
 
 from playwright.sync_api import sync_playwright
@@ -15,49 +13,42 @@ from scraper.scrape import USER_AGENT
 
 URL = "https://www.canvas-world.com/en/locations/united-kingdom/glasgow/boyce-house#rooms"
 
+CARD_DUMP_JS = """
+() => {
+  const titles = Array.from(document.querySelectorAll('[data-automation="Floor-Room-Card-Title"]'));
+  return titles.map(t => {
+    const card = t.closest('[data-automation="Floor-Room-Card-Content"]') || t.parentElement;
+    const desc = card ? card.querySelector('[data-automation="Floor-Room-Card-Description"]') : null;
+    const visible = !!(t.offsetWidth || t.offsetHeight || t.getClientRects().length);
+    return {
+      name: t.innerText.trim(),
+      price_text: desc ? desc.innerText.trim() : null,
+      visible,
+    };
+  });
+}
+"""
+
+TOGGLE_STATE_JS = """
+() => {
+  const clickable = Array.from(document.querySelectorAll('button, a, [role="tab"], [role="button"]'))
+    .filter(el => /^\\s*(en.?suite|studio)\\s*$/i.test((el.innerText || '').trim()));
+  return clickable.map(el => ({
+    text: el.innerText.trim(),
+    aria_selected: el.getAttribute('aria-selected'),
+    aria_pressed: el.getAttribute('aria-pressed'),
+    cls: (el.className || '').toString().slice(0, 100),
+  }));
+}
+"""
+
 
 def dump(page, label):
-    data = page.evaluate("""
-    () => {
-      const bodyText = document.body.innerText;
-      const mentionsSilver = /silver/i.test(bodyText);
-      const mentionsPlatinum = /platinum/i.test(bodyText);
-
-      const priceEls = Array.from(document.querySelectorAll('*'))
-        .filter(el => el.children.length === 0 && /£\\d/.test(el.innerText || ''));
-      const prices = priceEls.map(el => el.innerText.trim());
-
-      // any element whose text mentions a tier name, visible or not
-      const tierMentions = Array.from(document.querySelectorAll('*'))
-        .filter(el => el.children.length === 0 && /silver|platinum|bronze|gold/i.test(el.innerText || ''))
-        .map(el => ({
-          text: el.innerText.trim().slice(0, 60),
-          visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length),
-        }));
-
-      // clickable controls that might page/carousel through tiers
-      const controls = Array.from(document.querySelectorAll('button, a, [role="tab"], [role="button"], [class*="arrow" i], [class*="next" i], [class*="prev" i], [class*="carousel" i], [aria-label]'))
-        .map(el => ({
-          tag: el.tagName,
-          text: (el.innerText || '').trim().slice(0, 40),
-          aria: el.getAttribute('aria-label'),
-          cls: (el.className || '').toString().slice(0, 60),
-        }))
-        .filter(c => c.text || c.aria);
-
-      return {
-        mentionsSilver, mentionsPlatinum,
-        price_count: prices.length,
-        prices,
-        tier_mention_count: tierMentions.length,
-        tier_mentions: tierMentions.slice(0, 30),
-        control_count: controls.length,
-        controls: controls.slice(0, 40),
-      };
-    }
-    """)
     print(f"\n--- {label} ---")
-    print(json.dumps(data, indent=2)[:6000])
+    print("toggle state:", json.dumps(page.evaluate(TOGGLE_STATE_JS)))
+    cards = page.evaluate(CARD_DUMP_JS)
+    print(f"card_count={len(cards)}")
+    print(json.dumps(cards, indent=2))
 
 
 with sync_playwright() as p:
@@ -65,28 +56,30 @@ with sync_playwright() as p:
     page = browser.new_page(user_agent=USER_AGENT)
     page.goto(URL, timeout=60000, wait_until="load")
     page.wait_for_timeout(6000)
-    dump(page, "initial load (en-suite default view)")
+    dump(page, "initial load")
 
-    # scroll fully to trigger any lazy-loaded cards
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    page.wait_for_timeout(3000)
-    dump(page, "after scrolling to bottom")
-
-    page.evaluate("window.scrollTo(0, 0)")
-    page.wait_for_timeout(1000)
-
-    # dump full raw HTML of whatever section contains the room cards, to eyeball structure
-    html = page.evaluate("""
+    clicked_studio = page.evaluate("""
     () => {
-      const priceEl = Array.from(document.querySelectorAll('*'))
-        .find(el => el.children.length === 0 && /£\\d/.test(el.innerText || ''));
-      if (!priceEl) return 'NO PRICE EL FOUND';
-      let node = priceEl;
-      for (let up = 0; up < 6 && node.parentElement; up++) node = node.parentElement;
-      return node.outerHTML.slice(0, 4000);
+      const clickable = Array.from(document.querySelectorAll('button, a, [role="tab"], [role="button"]'));
+      const t = clickable.find(el => /studio/i.test(el.innerText || ''));
+      if (t) { t.click(); return true; }
+      return false;
     }
     """)
-    print("\n--- surrounding HTML (6 levels up from first price element) ---")
-    print(html)
+    if clicked_studio:
+        page.wait_for_timeout(3000)
+        dump(page, "after clicking STUDIO toggle")
+
+    clicked_ensuite = page.evaluate("""
+    () => {
+      const clickable = Array.from(document.querySelectorAll('button, a, [role="tab"], [role="button"]'));
+      const t = clickable.find(el => /^\\s*en.?suite\\s*$/i.test((el.innerText || '').trim()));
+      if (t) { t.click(); return true; }
+      return false;
+    }
+    """)
+    if clicked_ensuite:
+        page.wait_for_timeout(3000)
+        dump(page, "after clicking back to EN SUITE toggle")
 
     browser.close()
