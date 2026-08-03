@@ -99,14 +99,27 @@ def scrape_prestige(page, url):
     return out
 
 
-_CANVAS_CARD_JS = """
+_CANVAS_PRICE_SNAPSHOT_JS = """
 () => {
-  const titles = Array.from(document.querySelectorAll('[data-automation="Floor-Room-Card-Title"]'));
-  return titles.map(t => {
-    const card = t.closest('[data-automation="Floor-Room-Card-Content"]') || t.parentElement;
-    const desc = card ? card.querySelector('[data-automation="Floor-Room-Card-Description"]') : null;
-    return { name: t.innerText.trim(), price_text: desc ? desc.innerText.trim() : '' };
-  });
+  const results = [];
+  const priceEls = Array.from(document.querySelectorAll('span'))
+    .filter(el => /£\\d/.test(el.innerText || '') && el.children.length === 0);
+  for (const el of priceEls) {
+    let heading = '';
+    let node = el;
+    outer:
+    for (let up = 0; up < 8 && node; up++) {
+      let sib = node.previousElementSibling;
+      while (sib) {
+        const h = sib.matches('h1,h2,h3,h4,h5') ? sib : sib.querySelector('h1,h2,h3,h4,h5');
+        if (h) { heading = h.innerText.trim(); break outer; }
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    results.push({ price: el.innerText.trim(), heading });
+  }
+  return results;
 }
 """
 
@@ -121,18 +134,13 @@ _CANVAS_CLICK_STUDIO_TOGGLE_JS = """
 
 
 def scrape_canvas(page, url):
-    """Room cards use data-automation="Floor-Room-Card-Title" (room name)
-    and "Floor-Room-Card-Description" (price text), confirmed via a real
-    diagnostic run - a big improvement on the old generic "any £-containing
-    span" scan, which occasionally snagged unrelated page content. En-suite
-    and studio tiers sit behind a two-way toggle (buttons labelled
-    "EN SUITE" / "STUDIO") rather than both being in the DOM at once, so
-    this scrapes the default (en-suite) view, clicks "STUDIO", and scrapes
-    again. Some tiers show "SOLD OUT" instead of a price - confirmed via the
-    same diagnostic run that Canvas's Silver and Platinum en-suite are
-    genuinely sold out right now, not a scraper miss. Those are still
-    recorded (price_pw=None, offer_text="SOLD OUT") so they stay visible in
-    the report instead of silently vanishing."""
+    """No stable class names (Tailwind-generated); prices are leaf <span>s
+    containing '£', room type is the nearest preceding heading. The page
+    shows en-suite and studio room tiers behind a two-way toggle (buttons
+    labelled "EN SUITE" / "STUDIO") rather than both at once, so this
+    scrapes the default (en-suite) view, clicks the "STUDIO" toggle, and
+    scrapes again - confirmed via a real diagnostic run to reveal the
+    studio tiers (Gold/Platinum/Silver) that were previously missing."""
     page.goto(url, timeout=60000, wait_until="load")
     page.wait_for_timeout(6000)
 
@@ -140,14 +148,16 @@ def scrape_canvas(page, url):
     seen = set()
 
     def collect():
-        for item in page.evaluate(_CANVAS_CARD_JS):
-            room_type = item["name"] or "Unknown room type"
-            if room_type in seen:
+        for item in page.evaluate(_CANVAS_PRICE_SNAPSHOT_JS):
+            price = _price_from_text(item["price"])
+            if price is None:
                 continue
-            seen.add(room_type)
-            price = _price_from_text(item["price_text"])
-            offer_text = "" if price is not None else item["price_text"]
-            out.append({"room_type": room_type, "price_pw": price, "offer_text": offer_text, "raw_text": item["price_text"]})
+            room_type = item["heading"] or "Unknown room type"
+            key = (room_type, price)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"room_type": room_type, "price_pw": price, "offer_text": "", "raw_text": item["price"]})
 
     collect()
     if page.evaluate(_CANVAS_CLICK_STUDIO_TOGGLE_JS):
