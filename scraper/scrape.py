@@ -30,19 +30,55 @@ def _price_from_text(text: str):
 
 
 def scrape_student_roost(page, url):
-    """Room type cards: div.roomGroup-card (excludes the "other Student
-    Roost properties nearby" cards, which use a different class)."""
+    """Each config URL opens a specific room-category modal via a
+    ?modal=rooms-{ensuite,studio}-st-mungos query param. The modal (found
+    via a generic [class*="modal"]/[role="dialog"] selector, confirmed
+    present and populated in a real diagnostic run) contains one price-per
+    price-bearing leaf element per room tier, e.g. "En-suite bronze" £179,
+    "Studio gold" £237 - a real per-tier breakdown, unlike the plain page's
+    .roomGroup-card summary which only shows one blended "from" price per
+    broad category. "Upper floor" en-suite variants (a premium sub-tier of
+    each of bronze/silver/gold) are dropped: Mark's ground-truth room list
+    only wants the 3 base en-suite tiers tracked, not those variants."""
     page.goto(url, timeout=60000, wait_until="load")
     page.wait_for_timeout(6000)
+    data = page.evaluate("""
+    () => {
+      const modal = document.querySelector('[class*="modal" i], [role="dialog"]');
+      if (!modal) return [];
+      const priceEls = Array.from(modal.querySelectorAll('*'))
+        .filter(el => el.children.length === 0 && /£\\d/.test(el.innerText || ''));
+      return priceEls.map(el => {
+        let heading = '';
+        let node = el;
+        outer:
+        for (let up = 0; up < 8 && node; up++) {
+          let sib = node.previousElementSibling;
+          while (sib) {
+            const h = sib.matches('h1,h2,h3,h4,h5,h6') ? sib : sib.querySelector('h1,h2,h3,h4,h5,h6');
+            if (h) { heading = h.innerText.trim(); break outer; }
+            sib = sib.previousElementSibling;
+          }
+          node = node.parentElement;
+        }
+        return { price: el.innerText.trim(), heading };
+      });
+    }
+    """)
     out = []
-    for card in page.query_selector_all(".roomGroup-card"):
-        text = card.inner_text().replace("\n", " ")
-        m = re.match(r"(.*?)\s+from\s*£", text)
-        room_type = m.group(1).strip() if m else "Unknown room type"
-        price = _price_from_text(text)
+    seen = set()
+    for item in data:
+        room_type = item["heading"] or "Unknown room type"
+        if "upper floor" in room_type.lower():
+            continue
+        price = _price_from_text(item["price"])
         if price is None:
             continue
-        out.append({"room_type": room_type, "price_pw": price, "offer_text": "", "raw_text": text[:300]})
+        key = (room_type, price)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"room_type": room_type, "price_pw": price, "offer_text": "", "raw_text": item["price"]})
     return out
 
 
@@ -63,111 +99,124 @@ def scrape_prestige(page, url):
     return out
 
 
+_CANVAS_PRICE_SNAPSHOT_JS = """
+() => {
+  const results = [];
+  const priceEls = Array.from(document.querySelectorAll('span'))
+    .filter(el => /£\\d/.test(el.innerText || '') && el.children.length === 0);
+  for (const el of priceEls) {
+    let heading = '';
+    let node = el;
+    outer:
+    for (let up = 0; up < 8 && node; up++) {
+      let sib = node.previousElementSibling;
+      while (sib) {
+        const h = sib.matches('h1,h2,h3,h4,h5') ? sib : sib.querySelector('h1,h2,h3,h4,h5');
+        if (h) { heading = h.innerText.trim(); break outer; }
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    results.push({ price: el.innerText.trim(), heading });
+  }
+  return results;
+}
+"""
+
+_CANVAS_CLICK_STUDIO_TOGGLE_JS = """
+() => {
+  const clickable = Array.from(document.querySelectorAll('button, a, [role="tab"], [role="button"]'));
+  const studioToggle = clickable.find(el => /studio/i.test(el.innerText || ''));
+  if (studioToggle) { studioToggle.click(); return true; }
+  return false;
+}
+"""
+
+
 def scrape_canvas(page, url):
     """No stable class names (Tailwind-generated); prices are leaf <span>s
-    containing '£', room type is the nearest preceding heading."""
+    containing '£', room type is the nearest preceding heading. The page
+    shows en-suite and studio room tiers behind a two-way toggle (buttons
+    labelled "EN SUITE" / "STUDIO") rather than both at once, so this
+    scrapes the default (en-suite) view, clicks the "STUDIO" toggle, and
+    scrapes again - confirmed via a real diagnostic run to reveal the
+    studio tiers (Gold/Platinum/Silver) that were previously missing."""
     page.goto(url, timeout=60000, wait_until="load")
     page.wait_for_timeout(6000)
-    data = page.evaluate("""
-    () => {
-      const results = [];
-      const priceEls = Array.from(document.querySelectorAll('span'))
-        .filter(el => /£\\d/.test(el.innerText || '') && el.children.length === 0);
-      for (const el of priceEls) {
-        let heading = '';
-        let node = el;
-        outer:
-        for (let up = 0; up < 8 && node; up++) {
-          let sib = node.previousElementSibling;
-          while (sib) {
-            const h = sib.matches('h1,h2,h3,h4,h5') ? sib : sib.querySelector('h1,h2,h3,h4,h5');
-            if (h) { heading = h.innerText.trim(); break outer; }
-            sib = sib.previousElementSibling;
-          }
-          node = node.parentElement;
-        }
-        results.push({ price: el.innerText.trim(), heading });
-      }
-      return results;
-    }
-    """)
+
     out = []
     seen = set()
-    for item in data:
-        price = _price_from_text(item["price"])
-        if price is None:
-            continue
-        room_type = item["heading"] or "Unknown room type"
-        key = (room_type, price)
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"room_type": room_type, "price_pw": price, "offer_text": "", "raw_text": item["price"]})
+
+    def collect():
+        for item in page.evaluate(_CANVAS_PRICE_SNAPSHOT_JS):
+            price = _price_from_text(item["price"])
+            if price is None:
+                continue
+            room_type = item["heading"] or "Unknown room type"
+            key = (room_type, price)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"room_type": room_type, "price_pw": price, "offer_text": "", "raw_text": item["price"]})
+
+    collect()
+    if page.evaluate(_CANVAS_CLICK_STUDIO_TOGGLE_JS):
+        page.wait_for_timeout(3000)
+        collect()
     return out
+
+
+_ABODUS_ROOM_PATTERN = re.compile(
+    r"(?:Available|Limited Availability)\s*\|\s*(.+?)\s*\|.*?"
+    r"Prices from:\s*£([\d,]+(?:\.\d{2})?)\s*P/W.*?View Room",
+    re.IGNORECASE,
+)
 
 
 def scrape_abodus(page, url):
     """Bricks-builder page: the room price ladder is <b> tags formatted
     '£175.00 P/W'. Bricks regenerates its hashed class names (e.g.
     'brxe-tmqjgv') between page loads, so scoping by class is unreliable -
-    confirmed by two real runs where the same selector matched 7 elements
-    once and 0 the next. Instead this filters structurally: real ladder
-    items have no heading directly above them, while both the page's hero
-    teaser price and its "similar properties" carousel (which repeats
-    prices for St James itself and other Abodus properties like Martha
-    Street Apartments in the same '£X P/W' format) always sit right under a
-    property-name heading. Room-type labels for each price couldn't be
-    reliably matched (see README.md "Known limitations") - rooms are
-    numbered by price rank instead until someone checks the page and
-    confirms real names."""
+    a class-based selector matched 7 elements once and 0 the next across
+    real runs. This instead reads each price's surrounding text (walking up
+    4 ancestor levels) and matches it against the real card copy pattern
+    "Available | {Room Name} | {description} | Prices from: £{price} P/W |
+    View Room" - confirmed via a real diagnostic run to return all 7 room
+    tiers with their actual names (e.g. "Classic En-suite", "Deluxe
+    Studio"). This also cleanly excludes the page's hero teaser price and
+    its "similar properties" carousel (St James itself + other Abodus
+    properties like Martha Street Apartments), which repeat the same
+    '£X P/W' format but end in "View Property" instead of "View Room" and
+    don't match the room-card pattern."""
     page.goto(url, timeout=60000, wait_until="load")
-    page.wait_for_timeout(6000)
+    page.wait_for_timeout(8000)
     texts = page.evaluate("""
     () => {
       const isPrice = t => /£\\d.*P\\/W/i.test(t);
-      const hasNearbyHeading = el => {
+      const containerText = el => {
         let node = el;
-        for (let up = 0; up < 6 && node; up++) {
-          let sib = node.previousElementSibling;
-          while (sib) {
-            if (sib.matches('h1,h2,h3,h4,h5') || sib.querySelector('h1,h2,h3,h4,h5')) return true;
-            sib = sib.previousElementSibling;
-          }
-          node = node.parentElement;
-        }
-        return false;
+        for (let up = 0; up < 4 && node.parentElement; up++) node = node.parentElement;
+        return node.innerText.replace(/\\n/g, ' | ');
       };
       return Array.from(document.querySelectorAll('b'))
-        .filter(b => isPrice(b.innerText.trim()) && !hasNearbyHeading(b))
-        .map(b => b.innerText.trim());
+        .filter(b => isPrice(b.innerText.trim()))
+        .map(b => containerText(b));
     }
     """)
     out = []
-    for i, t in enumerate(texts, start=1):
-        price = _price_from_text(t)
-        if price is None:
+    seen = set()
+    for t in texts:
+        m = _ABODUS_ROOM_PATTERN.search(t)
+        if not m:
             continue
-        out.append({
-            "room_type": f"Room tier {i} (label unconfirmed - see README)",
-            "price_pw": price,
-            "offer_text": "",
-            "raw_text": t,
-        })
+        room_type = m.group(1).strip()
+        price = float(m.group(2).replace(",", ""))
+        key = (room_type, price)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"room_type": room_type, "price_pw": price, "offer_text": "", "raw_text": t[:300]})
     return out
-
-
-def scrape_collegiate_unavailable(page, url):
-    """Bridle Works shows no static pricing - "Book my stay" redirects to a
-    StarRez booking portal that needs a date-range search to reveal prices,
-    which isn't reliably scrapeable with a plain page visit. Returns a
-    placeholder row so the gap is visible in the report instead of the
-    property silently vanishing."""
-    return [{
-        "room_type": "N/A",
-        "price_pw": None,
-        "offer_text": "Pricing lives behind a separate booking portal (StarRez) - check manually.",
-        "raw_text": "",
-    }]
 
 
 PARSERS = {
@@ -175,7 +224,6 @@ PARSERS = {
     "prestige": scrape_prestige,
     "canvas": scrape_canvas,
     "abodus": scrape_abodus,
-    "collegiate_unavailable": scrape_collegiate_unavailable,
 }
 
 

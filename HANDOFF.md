@@ -12,10 +12,15 @@ twice a day, scrape local competitors' room pricing, compare it to St
 Mungo's own pricing, and get a report showing side-by-side prices, % change
 since the last report, and % change since the first-ever recorded price.
 
-Repo: **markAitcheson/St-Mungo-s**, branch
-`claude/student-accommodation-access-5v5j44` (this branch is also currently
-the repo's *default* branch, which matters - GitHub Actions `schedule`
-triggers only ever fire from whatever branch is set as default).
+Repo: **markAitcheson/St-Mungo-s**. Default branch is
+`claude/student-accommodation-access-5v5j44` (this matters - GitHub Actions
+`schedule` triggers, and `workflow_dispatch` *registration* (see below),
+only ever work from whatever branch is set as default).
+
+A prior session's work happened on a different branch,
+`claude/script-scheduling-gmt-cyjouw`, and had not been merged into the
+default branch - see "Branch mismatch (resolved)" below for what that was
+and how it was fixed.
 
 ## Decisions already made (don't re-litigate these without reason)
 
@@ -71,114 +76,184 @@ data/history.csv, data/latest_comp_set.xlsx   Committed by the workflow each run
 README.md            Beginner-friendly GitHub setup instructions for Mark
 ```
 
+## Branch mismatch (resolved)
+
+A prior session's changes (new room-type-specific URLs, Bridle Works
+removal, schedule change to 08:00/14:00 GMT) were committed to
+`claude/script-scheduling-gmt-cyjouw` instead of the default branch
+(`claude/student-accommodation-access-5v5j44`), so none of it took effect
+on scheduled/dispatched runs - the default branch kept running the *old*
+code: old single overview URL for St Mungo's, Bridle Works still present,
+old 07:00/18:00 UTC schedule.
+
+Before the fix, Mark manually triggered the real "Glasgow comp set report"
+workflow to verify end-to-end delivery (Gmail secrets are now configured
+and working - he received a real email with the .xlsx attached). That run
+executed on the **default branch**, i.e. against the **old** code, not the
+new URLs from the other session. Concretely, confirmed from
+`data/history.csv` on the default branch (run at `2026-08-03T17:44:22+00:00`):
+- St Mungo's (own): both En-suite (£179) and Studio (£209) captured fine.
+- Foundry Courtyard (Prestige): 8 room types captured, looks complete.
+- **St James (Abodus): missing entirely from this run** (zero rows) -
+  consistent with the pre-existing documented flakiness below, not a new
+  issue.
+- **Canvas (Boyce House): only 2 rows, both En-suite** ("BRONZE EN SUITE"
+  £162, "GOLD EN SUITE" £188) - **no Studio rooms at all**. This confirms
+  the toggle-hiding risk flagged in this file previously: the old overview
+  page apparently only exposes one room type (En-suite) in the DOM by
+  default, and Studio isn't being captured.
+- Bridle Works: still present as a placeholder row (old code never removed
+  it - that removal only existed on the other branch).
+
+So: **the "missing room types" Mark observed were from the OLD
+scraper/URLs**, not a verdict on the new modal/anchor URLs, which were
+still untested at the time. Mark said he would manually supply the
+complete, correct list of room types per property, to use as ground truth.
+
+**Fix applied**: `claude/script-scheduling-gmt-cyjouw` was merged into a
+branch based on the current default branch (bringing in the new URLs,
+Bridle Works removal, and 08:00/14:00 GMT schedule), and the throwaway
+`_diag-st-mungos` diagnostic workflow/script from that branch was deleted
+before merging (it was only needed for one-off inspection, not for
+production). That merge is the PR this HANDOFF update ships with - once
+it's merged into `claude/student-accommodation-access-5v5j44`, the default
+branch will actually run the new code on schedule/dispatch.
+
+**Next session still needs to**: re-run and compare against Mark's
+manually-supplied ground-truth room type list, fixing the Canvas parser
+(confirmed missing Studio) and revisiting Abodus and the new St Mungo's
+modal URLs per the notes below - none of that behavioral validation was
+in scope for the branch-mismatch fix itself.
+
 ## The comp set (as of this session)
+
+Bridle Works (Collegiate) has been **removed** - Mark decided it's too hard
+to scrape reliably (see below) and asked for it to be dropped rather than
+kept as a placeholder row.
+
+Mark supplied **room/type-specific URLs** (modal deep-links or in-page
+anchors) in place of the plain overview pages the parsers were originally
+built against, then supplied the **ground-truth room type list per
+property** in this session. Every parser below has been rewritten and
+re-validated against that ground truth via real GitHub Actions diagnostic
+runs (see "Environment quirk" for the pattern) - not guessed:
 
 | Property | URL | is_own | parser key |
 |---|---|---|---|
-| St Mungo's (Student Roost) | https://www.studentroost.co.uk/locations/glasgow/st-mungos | True | `student_roost` |
-| St James (Abodus) | https://abodusstudents.com/accommodation/st-james-glasgow | False | `abodus` |
+| St Mungo's (Student Roost) - En-suite | https://www.studentroost.co.uk/locations/glasgow/st-mungos?modal=rooms-ensuite-st-mungos | True | `student_roost` |
+| St Mungo's (Student Roost) - Studio | https://www.studentroost.co.uk/locations/glasgow/st-mungos?modal=rooms-studio-st-mungos | True | `student_roost` |
+| St James (Abodus) | https://abodusstudents.com/accommodation/st-james-glasgow#the-rooms | False | `abodus` |
 | Foundry Courtyard (Prestige) | https://prestigestudentliving.com/student-accommodation/glasgow/foundry-courtyard | False | `prestige` |
-| Boyce House (Canvas) | https://www.canvas-world.com/en/locations/united-kingdom/glasgow/boyce-house | False | `canvas` |
-| Bridle Works (Collegiate) | https://www.collegiate-ac.com/uk-student-accommodation/glasgow/bridleworks/ | False | `collegiate_unavailable` |
+| Boyce House (Canvas) | https://www.canvas-world.com/en/locations/united-kingdom/glasgow/boyce-house#rooms | False | `canvas` |
 
-These were **overview/listing pages** (one URL per property showing all its
-room types), not per-room-type pages. Mark said he will provide **specific
-room-type URLs** for clearer pricing structure per room type - when he does,
-re-inspect those pages (using the diagnostic-workflow pattern above) before
-assuming the existing parsers still apply; per-room-type pages may have a
-different, possibly simpler/more reliable, DOM structure than the overview
-pages the current selectors were built against.
+## Validation status per site (confirmed via real GitHub Actions runs against Mark's ground truth)
 
-## Validation status per site (confirmed via real GitHub Actions runs, not guesses)
+- **St Mungo's (own)**: reliable, and now returns real per-tier pricing
+  instead of two blended category prices. The `?modal=...` query params
+  open a modal (`[class*="modal" i], [role="dialog"]`) containing one price
+  per tier - confirmed via a real run: En-suite modal returns Bronze £179,
+  Silver £199, Gold £209 (3 rows, matching Mark's list exactly); Studio
+  modal returns Bronze £211, plain "Studio" £209, Silver £209, Gold £237,
+  Platinum £275 (5 rows, also an exact match). The en-suite modal also
+  contains "upper floor" variants of each tier (e.g. "En-suite bronze -
+  upper floor" £189) - these are deliberately filtered out in
+  `scrape_student_roost()` since Mark's ground-truth list only wants the 3
+  base en-suite tiers tracked.
+- **Prestige Foundry Courtyard**: reliable, untouched this session (Mark
+  confirmed the report already looks accurate for this property).
+  `.RoomCard__inner` containers, 8-9 room types e.g. Bronze Plus Ensuite
+  £175, Silver Ensuite £190, Gold Studio £285. Text pattern:
+  `"Limited Availability {room name} {n} wks from £{price} pp/pw"`.
+- **Canvas Boyce House**: en-suite and studio tiers sit behind a two-way
+  toggle (buttons literally labelled "EN SUITE" / "STUDIO") rather than
+  both being in the DOM at once - `scrape_canvas()` now scrapes the default
+  view, clicks the "STUDIO" toggle, and scrapes again. Confirmed via a real
+  run: this correctly returns all 3 studio tiers (Silver £270, Gold £297,
+  Platinum £314), an exact match against Mark's list. The en-suite side
+  only returned 2 of the 4 tiers Mark listed (Bronze £162, Gold £188 - no
+  Silver or Platinum), consistently across two independent live runs on
+  different page loads, which points to those two tiers being genuinely
+  unavailable/sold out right now rather than a scraper bug (the toggle
+  mechanism itself is proven to work, since it found 3/3 on the studio
+  side). Room types that don't currently have a price simply don't appear
+  in that run - this is the same "sold out rooms drop out" behavior the
+  report already relies on elsewhere, not something to chase further
+  unless it recurs with Silver/Platinum permanently absent.
+- **St James (Abodus)**: now reliable, with real room-tier names. Previous
+  sessions could never get real tier labels and saw the scoped-selector
+  flakiness described below; the fix that resolved both problems at once
+  was to stop trying to identify ladder items via DOM structure (headings,
+  class names) and instead match each price's surrounding text against the
+  real card copy pattern `"Available | {Room Name} | {description} |
+  Prices from: £{price} P/W | View Room"` (or `"Limited Availability | ..."`
+  for low-stock rooms). This is class-name-independent (survives Bricks'
+  hashed-class churn - see below) and returns genuine names like "Classic
+  En-suite" / "Deluxe Studio" directly from the page copy. It also cleanly
+  excludes the page's hero teaser price and "similar properties" carousel
+  (St James itself + other Abodus properties like Martha Street
+  Apartments), which repeat the same `£X P/W` format but end in "View
+  Property" instead of "View Room" and so never match the pattern.
+  Confirmed via a real run: all 7 of Mark's listed tiers came back exactly
+  (Classic/Premium/Superior En-suite, Classic/Premium/Deluxe/Superior
+  Studio), no cross-sell contamination, no missing rows.
+- **Bridle Works (Collegiate)**: no longer scraped - removed from
+  `PROPERTIES` entirely at Mark's request (was previously kept as a
+  placeholder "N/A - check manually" row because "Book my stay" redirects to
+  a StarRez third-party booking portal that only reveals prices after a
+  date-range search; Mark decided that wasn't worth carrying).
 
-- **Student Roost (own)**: reliable. `.roomGroup-card` containers, e.g. "En-suite
-  Rooms" £179/pw, "Studio Rooms" £209/pw. (A different card class,
-  `.propertySmall-card`, links to *other* Student Roost buildings nearby -
-  correctly excluded.)
-- **Prestige Foundry Courtyard**: reliable. `.RoomCard__inner` containers, 8-9
-  room types e.g. Bronze Plus Ensuite £175, Silver Ensuite £190, Gold Studio
-  £285.
-  Text pattern: `"Limited Availability {room name} {n} wks from £{price} pp/pw"`.
-- **Canvas Boyce House**: reliable. No stable class names (Tailwind-generated
-  hashes) - selector finds price-bearing `<span>` leaves and walks up to the
-  nearest preceding heading (`h1-h5`) for the room type name, e.g. "BRONZE EN
-  SUITE" £162, "GOLD EN SUITE" £188.
-- **St James (Abodus)**: unreliable, and *not currently fixed* - see below.
-- **Bridle Works (Collegiate)**: not scraped at all by design. "Book my stay"
-  redirects to a StarRez third-party booking portal
-  (`ukportal.collegiate-ac.com/...`) that only reveals prices after a
-  date-range search - not something a plain page visit can capture. The
-  scraper returns a placeholder row (`room_type: "N/A"`, explanatory
-  `offer_text`) so the gap is visible in the report rather than silent.
-
-### Open problem: Abodus St James is flaky
-
-Across 4 real fetches in this session:
-1. First diagnostic fetch: found the genuine 7-item price ladder (£175-£280,
-   ascending) in `<b>` tags inside a `div.brxe-tmqjgv` (Bricks page-builder
-   auto-generated class).
-2. Production run: same unscoped selector also picked up **cross-sell
-   carousel prices** for other Abodus properties (e.g. Martha Street
-   Apartments' £199) mixed into the results - a real bug, fixed by scoping
-   to `div.brxe-tmqjgv`.
-3. Next run: the scoped selector matched **zero** elements (Bricks
-   apparently regenerates its hashed class names between page loads/builds
-   - not a stable selector).
-4. Rewrote to a class-independent structural heuristic (real ladder items
-   have no heading directly above them; both the hero teaser price and the
-   cross-sell carousel do). Re-tested 3 more times (with/without scrolling,
-   3s/8s waits): **all three found the same 5 cross-sell-only values, never
-   the true ladder again.** No bot-check page text was detected
-   (`contains_bot_check_wording: false`), and scrolling/waiting longer made
-   no difference - so it isn't a lazy-load timing issue on our end.
-
-Current best guess: Abodus's own pricing widget makes an async call that is
-itself flaky/rate-limited server-side (possibly from repeated automated
-requests off the same GitHub Actions IP range during this session's
-testing). This is documented as a known limitation in README.md rather than
-silently hidden. **Do not spend more effort tuning selectors on the
-overview page** - if Mark supplies a specific St James room-type URL, try
-that fresh instead; it may hit a different, more stable endpoint.
-
-When Abodus *does* return data, room types are labelled "Room tier 1"
-onward (price rank order) rather than real names, since names couldn't be
-tied to prices confidently - price/% tracking is still accurate even with
-placeholder labels.
+Prior sessions saw Abodus's price ladder disappear intermittently
+(`div.brxe-tmqjgv`, a Bricks-builder auto-generated class, regenerates
+between page loads/builds, and a purely structural "no heading nearby"
+heuristic sometimes matched 0 real items and sometimes matched only the
+cross-sell carousel). The content-pattern approach above sidesteps both
+problems since it never depends on class names or DOM position - only on
+the price's own surrounding text, which is stable page copy. If it ever
+goes flaky again, that would point to a genuine server-side issue on
+Abodus's end rather than our selector, since the current approach doesn't
+share the previous approaches' failure modes.
 
 ## How the comparison math works (scraper/compare.py)
 
 - `categorize(room_type)` - keyword heuristic (`studio`/`ensuite`/`twin`
   etc. in the name) mapping free-text room type names to a small set of
-  categories, used to compare unlike room names across competitors.
+  broad categories, used to group comparable rooms across competitors.
 - `build_comparison(history_rows)` - for the latest run, per (property,
   room_type): % vs the immediately preceding run, % vs the very first run
-  ever recorded (baseline), and % vs St Mungo's own latest average price in
-  the same category.
+  ever recorded (baseline), and % vs **whichever St Mungo's room in the
+  same broad category is closest in price right now** (not a blended
+  average across all our own tiers - Mark's ground-truth room list showed
+  every property has multiple price/quality tiers within "en-suite" and
+  "studio", e.g. Bronze/Silver/Gold/Platinum or Classic/Premium/Superior/
+  Deluxe depending on the site, and averaging them together was misleading
+  when comparing a specific competitor tier). The matched St Mungo's room
+  is surfaced in the report as a new "Equivalent St Mungo's room" column
+  (`report_excel.py`), so it's visible which of our tiers each competitor
+  room is actually being weighed against.
 - Room types that stop appearing in a run (e.g. sold out) simply drop out of
   that run's comparison rather than showing stale data.
 
-## Outstanding / not yet done (what the user is about to give you)
+## Outstanding / not yet done
 
-1. **Schedule times**: `.github/workflows/comp-set-report.yml` currently has
-   placeholder cron times `0 7 * * *` and `0 18 * * *` (07:00 and 18:00
-   UTC) - Mark has *not* confirmed these, he only knows they're
-   placeholders. Ask what times he actually wants (get local UK time, then
-   convert to UTC - watch for BST vs GMT) and update the two `cron:` lines,
-   plus the comment above them and the README's "Changing the schedule"
-   section if the explanation needs updating.
-2. **Room-type-specific URLs**: Mark said he'll provide these "so we can get
-   a clearer understanding of the pricing structures." When they arrive:
-   re-run the diagnostic-workflow inspection pattern on each new URL before
-   changing any parser - don't assume they share structure with the
-   overview pages already scraped.
-3. **Mark still needs to complete his side of setup** (unconfirmed as of
-   this note): create a dedicated Gmail account, turn on 2-Step
-   Verification, generate an app password, add three repo secrets
-   (`REPORT_EMAIL_FROM`, `REPORT_EMAIL_APP_PASSWORD`, `REPORT_EMAIL_TO`),
-   then manually trigger the workflow once via the Actions tab to confirm a
-   real email arrives. Full step-by-step is in README.md - point him there
-   rather than re-explaining inline unless he's stuck on a specific step.
-4. **Not started**: "Option B" from earlier discussion - a live workbook in
+1. **Branch mismatch: resolved.** PR #1 merges the new URLs/config/schedule
+   from `claude/script-scheduling-gmt-cyjouw` onto the default branch.
+2. **Ground-truth room type validation: done.** Mark's room list for St
+   Mungo's, Canvas, and Abodus has been checked against real scrape output
+   (see "Validation status per site" above) and all three parsers rewritten
+   to match. Foundry Courtyard (Prestige) was untouched - Mark confirmed it
+   already looked accurate.
+3. **Canvas en-suite Silver/Platinum**: only Bronze and Gold en-suite came
+   back in two independent live runs; Studio came back complete (3/3). Most
+   likely those two tiers are just sold out right now rather than a
+   scraper bug (see "Validation status per site" for the reasoning) - worth
+   a quick recheck in a future run, but not treated as broken.
+4. **Gmail/secrets setup**: done and confirmed working end-to-end (real
+   email received with .xlsx attached) in an earlier session, before this
+   session's parser fixes - worth a fresh manual trigger once PR #1 is
+   merged to confirm the new per-tier rows render correctly in the actual
+   emailed spreadsheet (this session validated the scrape/compare logic
+   directly, not the full emailed report).
+5. **Not started**: "Option B" from earlier discussion - a live workbook in
    OneDrive updated in place via Microsoft Graph API, instead of a
    committed file per run. Only worth revisiting if Mark asks for it later;
    requires an Azure app registration, more setup than the current

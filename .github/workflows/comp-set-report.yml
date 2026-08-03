@@ -2,10 +2,11 @@ name: Glasgow comp set report
 
 on:
   schedule:
-    # Times are UTC. 07:00 and 18:00 UTC ≈ 07:00/18:00 GMT (winter) or
-    # 08:00/19:00 BST (summer) - see README.md "Changing the schedule".
-    - cron: "0 7 * * *"
-    - cron: "0 18 * * *"
+    # Times are UTC. GMT is a fixed UTC+0 offset (it doesn't observe
+    # daylight saving, unlike BST), so 08:00/14:00 GMT = 08:00/14:00 UTC
+    # year-round - see README.md "Changing the schedule".
+    - cron: "0 8 * * *"
+    - cron: "0 14 * * *"
   workflow_dispatch: {}
 
 permissions:
