@@ -108,20 +108,39 @@ def scrape_canvas(page, url):
 
 def scrape_abodus(page, url):
     """Bricks-builder page: the room price ladder is <b> tags formatted
-    '£175.00 P/W' inside div.brxe-tmqjgv specifically - scoping to that
-    container is required because the page also has a "similar properties"
-    carousel lower down with prices for St James itself and other Abodus
-    properties (e.g. Martha Street Apartments) in the same '£X P/W' format,
-    which a bare 'b' selector would wrongly mix in. Room-type labels for
-    each price couldn't be reliably matched (see README.md "Known
-    limitations") - rooms are numbered by price rank instead until someone
-    checks the page and confirms real names."""
+    '£175.00 P/W'. Bricks regenerates its hashed class names (e.g.
+    'brxe-tmqjgv') between page loads, so scoping by class is unreliable -
+    confirmed by two real runs where the same selector matched 7 elements
+    once and 0 the next. Instead this filters structurally: real ladder
+    items have no heading directly above them, while both the page's hero
+    teaser price and its "similar properties" carousel (which repeats
+    prices for St James itself and other Abodus properties like Martha
+    Street Apartments in the same '£X P/W' format) always sit right under a
+    property-name heading. Room-type labels for each price couldn't be
+    reliably matched (see README.md "Known limitations") - rooms are
+    numbered by price rank instead until someone checks the page and
+    confirms real names."""
     page.goto(url, timeout=60000, wait_until="load")
     page.wait_for_timeout(6000)
     texts = page.evaluate("""
-    () => Array.from(document.querySelectorAll('div.brxe-tmqjgv b'))
-      .map(b => b.innerText.trim())
-      .filter(t => /£\\d.*P\\/W/i.test(t))
+    () => {
+      const isPrice = t => /£\\d.*P\\/W/i.test(t);
+      const hasNearbyHeading = el => {
+        let node = el;
+        for (let up = 0; up < 6 && node; up++) {
+          let sib = node.previousElementSibling;
+          while (sib) {
+            if (sib.matches('h1,h2,h3,h4,h5') || sib.querySelector('h1,h2,h3,h4,h5')) return true;
+            sib = sib.previousElementSibling;
+          }
+          node = node.parentElement;
+        }
+        return false;
+      };
+      return Array.from(document.querySelectorAll('b'))
+        .filter(b => isPrice(b.innerText.trim()) && !hasNearbyHeading(b))
+        .map(b => b.innerText.trim());
+    }
     """)
     out = []
     for i, t in enumerate(texts, start=1):
