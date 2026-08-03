@@ -1,0 +1,42 @@
+name: Glasgow comp set report
+
+on:
+  schedule:
+    # Times are UTC. 07:00 and 18:00 UTC ≈ 07:00/18:00 GMT (winter) or
+    # 08:00/19:00 BST (summer) - see README.md "Changing the schedule".
+    - cron: "0 7 * * *"
+    - cron: "0 18 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run pipeline
+        env:
+          REPORT_EMAIL_FROM: ${{ secrets.REPORT_EMAIL_FROM }}
+          REPORT_EMAIL_APP_PASSWORD: ${{ secrets.REPORT_EMAIL_APP_PASSWORD }}
+          REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
+        run: python run_pipeline.py
+
+      - name: Commit updated data
+        run: |
+          git config user.name "comp-set-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/history.csv data/latest_comp_set.xlsx
+          git diff --staged --quiet || git commit -m "Update comp set data $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
