@@ -116,12 +116,12 @@ and 14:00 GMT every day without you doing anything.
 
 ## Known limitations (please read)
 
-- **Canvas (Boyce House) en-suite rooms**: two of the four en-suite tiers
-  (Silver and Platinum) have been missing from recent runs while all three
-  studio tiers came through fine - this looks like those two tiers being
-  genuinely sold out on Canvas's site right now rather than a scraper
-  problem, but if it persists for a long time let me know and I'll take
-  another look.
+- **Canvas (Boyce House) en-suite rooms**: Silver and Platinum en-suite are
+  currently sold out on Canvas's own site (their page shows "SOLD OUT"
+  instead of a price) - the report now shows them with an empty price and
+  a "SOLD OUT" note instead of leaving them off entirely, so you can see
+  they exist without them affecting the price comparisons. They'll pick up
+  real prices again automatically once back in stock.
 - Any competitor can redesign their website at any time, which may break
   its scraper. When that happens the report will show a "SCRAPE ERROR" row
   for that property instead of a wrong price - if you see one, let me know
