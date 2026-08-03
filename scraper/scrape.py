@@ -107,14 +107,19 @@ def scrape_canvas(page, url):
 
 
 def scrape_abodus(page, url):
-    """Bricks-builder page: prices are in <b> tags formatted '£175.00 P/W',
-    but room-type labels for them couldn't be reliably matched (see
-    README.md "Known limitations") - rooms are numbered by price rank
-    instead until someone checks the page and confirms real names."""
+    """Bricks-builder page: the room price ladder is <b> tags formatted
+    '£175.00 P/W' inside div.brxe-tmqjgv specifically - scoping to that
+    container is required because the page also has a "similar properties"
+    carousel lower down with prices for St James itself and other Abodus
+    properties (e.g. Martha Street Apartments) in the same '£X P/W' format,
+    which a bare 'b' selector would wrongly mix in. Room-type labels for
+    each price couldn't be reliably matched (see README.md "Known
+    limitations") - rooms are numbered by price rank instead until someone
+    checks the page and confirms real names."""
     page.goto(url, timeout=60000, wait_until="load")
     page.wait_for_timeout(6000)
     texts = page.evaluate("""
-    () => Array.from(document.querySelectorAll('b'))
+    () => Array.from(document.querySelectorAll('div.brxe-tmqjgv b'))
       .map(b => b.innerText.trim())
       .filter(t => /£\\d.*P\\/W/i.test(t))
     """)
