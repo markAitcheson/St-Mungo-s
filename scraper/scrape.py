@@ -156,26 +156,11 @@ def scrape_abodus(page, url):
     return out
 
 
-def scrape_collegiate_unavailable(page, url):
-    """Bridle Works shows no static pricing - "Book my stay" redirects to a
-    StarRez booking portal that needs a date-range search to reveal prices,
-    which isn't reliably scrapeable with a plain page visit. Returns a
-    placeholder row so the gap is visible in the report instead of the
-    property silently vanishing."""
-    return [{
-        "room_type": "N/A",
-        "price_pw": None,
-        "offer_text": "Pricing lives behind a separate booking portal (StarRez) - check manually.",
-        "raw_text": "",
-    }]
-
-
 PARSERS = {
     "student_roost": scrape_student_roost,
     "prestige": scrape_prestige,
     "canvas": scrape_canvas,
     "abodus": scrape_abodus,
-    "collegiate_unavailable": scrape_collegiate_unavailable,
 }
 
 
