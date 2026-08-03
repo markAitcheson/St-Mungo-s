@@ -119,13 +119,20 @@ and 18:00 UTC every day without you doing anything.
   reveals prices after you search specific dates. This isn't something a
   simple page visit can capture reliably, so this competitor currently shows
   up in the report as "N/A - check manually" rather than a guessed price.
-- **St James (Abodus)**: prices are captured correctly, but the exact room
-  type name for each price couldn't be confirmed from the page structure,
-  so rooms are currently labelled "Room tier 1" through "Room tier 7"
-  (lowest to highest price) instead of their real names. Price tracking and
-  % changes are still accurate - only the label needs a one-time manual
-  check. If you open abodusstudents.com/accommodation/st-james-glasgow and
-  tell me the real room names in price order, I'll fix the label mapping.
+- **St James (Abodus)**: less reliable than the other three sites. Its price
+  ladder loads via a separate call their own page makes after the initial
+  page load, and across several real test runs that call succeeded once
+  (returning 7 room prices) and failed silently the other times (returning
+  none) - waiting longer and scrolling the page didn't change this, so it
+  looks like an intermittent issue on Abodus's own site (possibly rate
+  limiting repeated automated visits) rather than something fixable in the
+  scraper. Expect this property to sometimes show no rows for a given run -
+  that's expected, not a bug, and the run still completes normally for the
+  other four properties. When it does succeed, exact room-type names for
+  each price still couldn't be confirmed from the page structure, so rooms
+  are labelled "Room tier 1" onward (lowest to highest price) rather than
+  their real names - price tracking and % changes are still accurate, only
+  the label is a placeholder.
 - Any competitor can redesign their website at any time, which may break
   its scraper. When that happens the report will show a "SCRAPE ERROR" row
   for that property instead of a wrong price - if you see one, let me know
