@@ -206,31 +206,49 @@ guessed) - see below.
   broad categories, used to group comparable rooms across competitors.
 - `build_comparison(history_rows)` - for the latest run, per (property,
   room_type): % vs the immediately preceding run, % vs the very first run
-  ever recorded (baseline), and % vs **whichever St Mungo's room in the
-  same broad category is the equivalent tier**, matched by name or
-  hierarchy position - **never by price** (not a blended average across
-  all our own tiers either - every property has multiple price/quality
-  tiers within "en-suite" and "studio", e.g. Bronze/Silver/Gold/Platinum or
-  Classic/Premium/Superior/Deluxe depending on the site, and averaging them
-  together was misleading when comparing a specific competitor tier).
-  `find_equivalent()` first tries a shared tier keyword (bronze/silver/
-  gold/platinum - used by St Mungo's, Canvas and Prestige) so e.g. a
-  competitor's "Silver Ensuite" matches our "En-suite silver" directly.
-  When the competitor's tier names don't overlap with ours (e.g. Abodus's
-  Classic/Premium/Superior/Deluxe), it falls back to the room's ordinal
-  position within that competitor's own category, in the order their tiers
-  appear in the source data, mapped proportionally onto our own tier
-  ladder for that category - position in the hierarchy, not the price
-  itself, decides the match. Price is only used afterwards, to compute the
-  displayed % difference between the two now-matched rooms. The matched St
-  Mungo's room is surfaced in the report as an "Equivalent St Mungo's room"
-  column (`report_excel.py`), so it's visible which of our tiers each
-  competitor room is actually being weighed against. That column is
-  colour-coded red/green in `report_excel.py` too - red when the
-  competitor is priced *below* St Mungo's, green when *above* (the
-  opposite sense to the "vs last report"/"vs baseline" trend columns,
-  which are red-up/green-down on our own price history, not a competitor
-  comparison).
+  ever recorded (baseline), and % vs **whichever St Mungo's room Mark
+  specified as its equivalent tier**, looked up from `ROOM_EQUIVALENCE` in
+  `scraper/compare.py` - **never guessed by tier name, hierarchy position,
+  or price**. As of 2026-08-04, Mark dictated the full equivalence list
+  directly (superseding the previous `find_equivalent()` heuristic from PR
+  #4, which guessed via a shared tier keyword like bronze/silver/gold/
+  platinum, falling back to ordinal position in the source listing when tier
+  names didn't overlap, e.g. Abodus's Classic/Premium/Superior/Deluxe). The
+  new `ROOM_EQUIVALENCE` dict is keyed by `(property_id, normalized
+  competitor room name)` -> St Mungo's room name; `_normalize()` strips
+  case/spacing/hyphenation so e.g. Canvas's "BRONZE EN SUITE" and Abodus's
+  "Classic En-suite" both key correctly regardless of each site's own
+  formatting. A competitor room with no entry in the dict (e.g. Prestige's
+  "Silver Plus Ensuite", "Bronze Sky View Ensuite", "Platinum 2 Bed Flat",
+  or Canvas's "PLATINUM EN SUITE" - St Mungo's has no platinum en-suite
+  tier) simply gets no equivalent match and no "vs St Mungo's" figure -
+  this is intentional, not a gap to fill in. The full mapping as Mark gave
+  it:
+  - En-suite bronze = Canvas Bronze En-suite, Foundry Bronze Plus En-suite,
+    St James Classic En-suite
+  - En-suite silver = Canvas Silver En-suite, Foundry Silver En-suite,
+    St James Premium En-suite
+  - En-suite gold = Canvas Gold En-suite, Foundry Gold En-suite,
+    St James Superior En-suite
+  - Bronze studio = St James Classic studio
+  - Silver studio = Canvas Silver studio, Foundry Silver studio,
+    St James Premium studio
+  - Gold studio = Canvas Gold studio, Foundry Gold studio,
+    St James Deluxe studio
+  - Platinum studio = Canvas Platinum studio, St James Superior studio
+
+  Price is only used afterwards, to compute the displayed % difference
+  between the two now-matched rooms. The matched St Mungo's room is
+  surfaced in the report as an "Equivalent St Mungo's room" column
+  (`report_excel.py`), so it's visible which of our tiers each competitor
+  room is actually being weighed against. That column is colour-coded
+  red/green in `report_excel.py` too - red when the competitor is priced
+  *below* St Mungo's, green when *above* (the opposite sense to the "vs
+  last report"/"vs baseline" trend columns, which are red-up/green-down on
+  our own price history, not a competitor comparison). If Mark adds a new
+  competitor room type or wants a pairing changed, update `ROOM_EQUIVALENCE`
+  directly (or add a new `_add_equivalence(...)` call) - don't reintroduce
+  heuristic matching.
 - Rooms present in the latest run with **no price** (e.g. sold out, like
   Canvas Silver/Platinum en-suite above) still get a row in the comparison
   output - price/deltas/equivalent-room are all blank, but the room stays

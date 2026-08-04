@@ -106,12 +106,14 @@ hour, not on it - see the schedule comment in `comp-set-report.yml`).
   - **"Latest comp set" sheet** - every room type at every property, its
     current price, current offer, % change vs the last report (red = went
     up, green = went down), % change vs the very first price ever recorded,
-    which St Mungo's room it's the equivalent tier to (matched by shared
-    tier name, e.g. a competitor's "Silver Ensuite" lines up with our
-    "En-suite silver", or by hierarchy position when the names don't match,
-    e.g. Abodus's "Premium En-suite" among its own tiers - never by price),
-    and % vs that equivalent room (red = priced below St Mungo's, green =
-    priced above, since these are competitors).
+    which St Mungo's room it's the equivalent tier to (from Mark's own
+    explicit room-equivalence list in `scraper/compare.py`, e.g. Abodus's
+    "Premium En-suite" is defined as equivalent to our "En-suite silver" -
+    never guessed by tier name or price), and % vs that equivalent room
+    (red = priced below St Mungo's, green = priced above, since these are
+    competitors). A competitor room with no defined equivalent (see
+    `ROOM_EQUIVALENCE` in `scraper/compare.py`) just shows no "vs St
+    Mungo's" figure.
   - **"History" sheet** - every price ever recorded, for building your own
     charts/pivot tables (this is the sheet to open with the Claude for Excel
     extension for trend analysis).
@@ -138,6 +140,9 @@ hour, not on it - see the schedule comment in `comp-set-report.yml`).
 - **Add or remove a competitor**: edit `scraper/config.py` (the `PROPERTIES`
   list) and add a matching parser function to `scraper/scrape.py`. Easiest
   to just ask me to do it with the new URL.
+- **Change which competitor room counts as equivalent to which of ours**:
+  edit `ROOM_EQUIVALENCE` in `scraper/compare.py`, or just tell me the new
+  pairing and I'll update it.
 - **Change the schedule**: edit the two `cron:` lines in
   `.github/workflows/comp-set-report.yml`. Times are UTC - use
   [crontab.guru](https://crontab.guru) to build a schedule, format is
