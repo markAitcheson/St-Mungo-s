@@ -17,11 +17,39 @@ Repo: **markAitcheson/St-Mungo-s**. Default branch is
 `schedule` triggers, and `workflow_dispatch` *registration*, only ever work
 from whatever branch is set as default - see "Environment quirk" below).
 
-**Current status: working and validated.** Two PRs landed this session
-(#1: branch mismatch + ground-truth room type fixes, #2: Canvas sold-out
-handling), both merged to default, both confirmed against real scheduled
-runs. See "Outstanding / not yet done" for what's actually still open -
-it's short.
+**Current status: working and validated, fresh baseline as of
+2026-08-04T08:15:46Z.** Four PRs/rounds of work have landed on default so
+far:
+- #1: branch mismatch + ground-truth room type fixes
+- #2: Canvas sold-out handling
+- #3: (merge of #1/#2 work, see git log)
+- #4: replaced price-based "closest equivalent" room matching with
+  name/hierarchy-position matching (`find_equivalent()` in
+  `scraper/compare.py`), and fixed the "vs St Mungo's" column colours,
+  which were inverted (was red-for-above/green-for-below; competitors
+  should read red-for-below/green-for-above St Mungo's price) - both
+  requested directly by Mark. PR #4 was merged via GitHub's PR UI.
+
+Two follow-up changes landed **after PR #4 merged**, pushed straight to
+default (Mark explicitly said "merge now", no PR - the changes were small
+and he wanted them live before the next scheduled run):
+- `data/history.csv` was truncated to just the header, so every room's
+  "first-ever recorded price" baseline resets to whatever the next run
+  scrapes - Mark asked for this explicitly ("clear history so the next 8am
+  report can be taken as the first").
+- The cron schedule moved from `0 8,14 * * *` to `5 8,14 * * *` UTC. The
+  08:00 run on 2026-08-04 never fired at all - Actions history showed zero
+  runs ever triggered by the `schedule` event, only `workflow_dispatch` -
+  which matches GitHub's own documented warning that `:00` is the most
+  congested slot for scheduled workflows and can be delayed/dropped.
+  Confirmed fixed: a manual `workflow_dispatch` at 08:15 UTC that day ran
+  clean against the cleared history and produced the new baseline row set
+  (visible at the top of `data/history.csv` now, all rows dated
+  `2026-08-04T08:15:46+00:00`). The **next real signal to watch for** is
+  whether the actual 08:05/14:05 cron fires on its own from here - nobody
+  has confirmed that yet, only the manual dispatch.
+
+See "Outstanding / not yet done" for what's actually still open.
 
 ## Decisions already made (don't re-litigate these without reason)
 
@@ -71,7 +99,19 @@ reverted with a follow-up commit once the finding is confirmed and applied
 properly via a PR - don't leave throwaway `_diag_*` files sitting on
 default. This repo has no branch protection, so direct pushes to default
 are technically possible, but should stay strictly to this
-push-diagnose-revert pattern; real changes always go through a PR.
+push-diagnose-revert pattern for diagnostics; real feature changes go
+through a PR by default.
+
+**Exception, seen this session**: after PR #4 merged, Mark asked for two
+more small changes (clear history, fix cron timing) and explicitly said
+"merge now" rather than go through another PR review round. Those went
+straight to default via a fast-forward push (branch was reset to default's
+tip first, committed on top, force-pushed to the feature branch, then
+fast-forwarded onto default) - no PR was opened for them. Read this as:
+PRs are the default for real changes, but a direct explicit instruction to
+skip review for a specific, already-understood change is Mark's call to
+make, not something to assume. Don't extend it to unrelated changes without
+him saying so again.
 
 Also: raw.githubusercontent.com is CDN-cached for a few minutes - when
 checking freshly-pushed file contents, fetch via
@@ -89,7 +129,7 @@ scraper/
   send_email.py     smtplib SMTP_SSL send via Gmail app password
 run_pipeline.py      Entry point: scrape -> append history -> build xlsx -> email
 requirements.txt     playwright, openpyxl
-.github/workflows/comp-set-report.yml   The real scheduled workflow (0 8,14 * * * UTC)
+.github/workflows/comp-set-report.yml   The real scheduled workflow (5 8,14 * * * UTC - not :00, see "Current status")
 data/history.csv, data/latest_comp_set.xlsx   Committed by the workflow each run
 README.md            Beginner-friendly GitHub setup instructions for Mark
 ```
@@ -202,24 +242,35 @@ guessed) - see below.
 
 ## Outstanding / not yet done
 
-Everything major from this session is resolved and confirmed via real
-scheduled runs, not just diagnostics. What's left:
-
-1. **Full emailed report visual check**: the scrape/compare pipeline is
-   confirmed correct via `data/history.csv` from real runs, but nobody has
-   eyeballed the actual emailed `.xlsx` since the Canvas sold-out fix
-   merged, to confirm "SOLD OUT" rows and the "Equivalent St Mungo's room"
-   column render as expected in Excel (not just in the underlying data).
-   Quick to check: trigger the workflow manually and open the attachment.
-2. **Not started**: "Option B" from earlier discussion - a live workbook in
+1. **Confirm the moved cron actually self-fires.** The 08:00/14:00 → 08:05/
+   14:05 change (see "Current status") has only been validated via a manual
+   `workflow_dispatch`, not a real unattended `schedule` trigger. Check
+   Actions history (`mcp__github__actions_list`, method
+   `list_workflow_runs`, filter `{"event": "schedule"}` on
+   `comp-set-report.yml`) after the next 08:05 or 14:05 UTC passes - if it's
+   still empty, the 5-minute offset wasn't enough and this needs escalating
+   (try a bigger offset, or ask Mark whether GitHub Actions cron reliability
+   is acceptable for a twice-daily business report at all).
+2. **Full emailed report visual check**: nobody has eyeballed the actual
+   emailed `.xlsx` from a real run since PR #4's tier-matching/colour fixes
+   merged, to confirm the "Equivalent St Mungo's room" column and the new
+   red-below/green-above colouring render as expected in Excel (not just in
+   the underlying data/tests). Quick to check: open the attachment from the
+   next real send, or trigger manually and check
+   `data/latest_comp_set.xlsx` as committed by the workflow.
+3. **Not started**: "Option B" from earlier discussion - a live workbook in
    OneDrive updated in place via Microsoft Graph API, instead of a
    committed file per run. Only worth revisiting if Mark asks for it later;
    requires an Azure app registration, more setup than the current
    approach.
-3. **Watch for recurring sold-out swings**: if Canvas Silver/Platinum
+4. **Watch for recurring sold-out swings**: if Canvas Silver/Platinum
    en-suite (or any other room) stays sold out indefinitely or flickers
    in/out a lot, that's just real-world inventory - no code change needed
    unless Mark asks for different handling (e.g. a "days sold out" stat).
+5. **Watch the fresh baseline settle in.** Since `data/history.csv` was
+   just cleared, the next couple of runs will have no "vs last report" or
+   meaningful "vs baseline" figures yet (nothing to compare against) - this
+   is expected, not a bug, until at least 2 runs have landed post-clear.
 
 ## Useful commands for resuming
 
