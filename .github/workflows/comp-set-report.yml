@@ -2,13 +2,22 @@ name: Glasgow comp set report
 
 on:
   schedule:
-    # Times are UTC. GMT is a fixed UTC+0 offset (it doesn't observe
-    # daylight saving, unlike BST), so 08:05/14:05 GMT = 08:05/14:05 UTC
-    # year-round - see README.md "Changing the schedule". Run at 5 past
-    # rather than on the hour - GitHub's own docs warn that :00 is the
-    # most congested slot for scheduled workflows and can be delayed or
-    # dropped, which is what happened to the very first 08:00 run.
+    # cron times are always UTC and GitHub Actions can't express "8am/2pm
+    # Europe/London" directly - the UK is on BST (UTC+1) roughly late March
+    # to late October and GMT (UTC+0) the rest of the year, so the UTC hour
+    # that means "8am local" changes twice a year. Rather than requiring a
+    # manual edit at every clock change, this fires at BOTH candidate UTC
+    # hours for each target local time (7 and 8 for the morning report, 13
+    # and 14 for the afternoon one) - the "Check local time window" step
+    # below then skips the run that doesn't actually land on 8am/2pm
+    # Europe/London, so exactly one real run happens per target time,
+    # automatically correct across the DST switch. Run at 5 past rather
+    # than on the hour - GitHub's own docs warn that :00 is the most
+    # congested slot for scheduled workflows and can be delayed or dropped,
+    # which is what happened to the very first 08:00 run.
+    - cron: "5 7 * * *"
     - cron: "5 8 * * *"
+    - cron: "5 13 * * *"
     - cron: "5 14 * * *"
   workflow_dispatch: {}
 
@@ -21,16 +30,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check local time window
+        id: gate
+        run: |
+          # Manual runs (workflow_dispatch) always proceed. Scheduled runs
+          # only proceed if this firing is the one that actually lands on
+          # 8am or 2pm Europe/London right now - see the "on.schedule"
+          # comment above for why there are 4 cron entries for 2 target
+          # times.
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          local_hour=$(TZ=Europe/London date +%H)
+          if [ "$local_hour" = "08" ] || [ "$local_hour" = "14" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping - it's ${local_hour}:xx in Europe/London, not the intended 08:xx/14:xx window."
+          fi
+
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.should_run == 'true'
         with:
           python-version: "3.11"
 
       - name: Install dependencies
+        if: steps.gate.outputs.should_run == 'true'
         run: |
           pip install -r requirements.txt
           playwright install --with-deps chromium
 
       - name: Run pipeline
+        if: steps.gate.outputs.should_run == 'true'
         env:
           REPORT_EMAIL_FROM: ${{ secrets.REPORT_EMAIL_FROM }}
           REPORT_EMAIL_APP_PASSWORD: ${{ secrets.REPORT_EMAIL_APP_PASSWORD }}
@@ -38,7 +70,7 @@ jobs:
         run: python run_pipeline.py
 
       - name: Commit updated data
-        if: always()
+        if: always() && steps.gate.outputs.should_run == 'true'
         run: |
           git config user.name "comp-set-bot"
           git config user.email "actions@users.noreply.github.com"

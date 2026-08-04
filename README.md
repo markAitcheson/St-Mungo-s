@@ -90,9 +90,13 @@ Don't wait for the schedule - test it now:
 6. If it fails (red cross), click into the run, click the `run-report` job,
    and read the red-highlighted step - see **Troubleshooting** below.
 
-Once step 4 succeeds, you're done - it will now run automatically at 08:05
-and 14:05 GMT every day without you doing anything (a few minutes past the
-hour, not on it - see the schedule comment in `comp-set-report.yml`).
+Once step 4 succeeds, you're done - it will now run automatically at 8am and
+2pm UK time every day without you doing anything (a few minutes past the
+hour, not on it - see the schedule comment in `comp-set-report.yml`). Under
+the hood the workflow actually wakes up 4 times a day and checks the current
+UK time, only doing real work on the 2 firings that land on 8am/2pm - that's
+how it stays correct across the BST/GMT clock change each year without
+needing a manual edit twice a year.
 
 ---
 
@@ -143,10 +147,11 @@ hour, not on it - see the schedule comment in `comp-set-report.yml`).
 - **Change which competitor room counts as equivalent to which of ours**:
   edit `ROOM_EQUIVALENCE` in `scraper/compare.py`, or just tell me the new
   pairing and I'll update it.
-- **Change the schedule**: edit the two `cron:` lines in
-  `.github/workflows/comp-set-report.yml`. Times are UTC - use
-  [crontab.guru](https://crontab.guru) to build a schedule, format is
-  `minute hour * * *`.
+- **Change the target local times**: edit the `local_hour = "08"`/`"14"`
+  checks and the matching `cron:` lines in
+  `.github/workflows/comp-set-report.yml` (each target local time needs 2
+  cron entries, one per UTC offset the UK can be at - see the comment
+  there). Easiest to just ask me to do it.
 - **Change who receives the report**: update the `REPORT_EMAIL_TO` secret in
   Step 3.
 

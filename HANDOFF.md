@@ -45,9 +45,36 @@ and he wanted them live before the next scheduled run):
   Confirmed fixed: a manual `workflow_dispatch` at 08:15 UTC that day ran
   clean against the cleared history and produced the new baseline row set
   (visible at the top of `data/history.csv` now, all rows dated
-  `2026-08-04T08:15:46+00:00`). The **next real signal to watch for** is
-  whether the actual 08:05/14:05 cron fires on its own from here - nobody
-  has confirmed that yet, only the manual dispatch.
+  `2026-08-04T08:15:46+00:00`).
+
+Two more rounds landed later the same day, both pushed straight to default
+(no PR - see "Environment quirk" below for when that's appropriate):
+- Replaced the tier-name/hierarchy-position `find_equivalent()` heuristic
+  with an explicit `ROOM_EQUIVALENCE` table in `scraper/compare.py`, built
+  from the full competitor-room-to-St-Mungo's-room pairing Mark dictated
+  directly - see "How the comparison math works" below for the exact
+  mapping and why the heuristic was replaced rather than kept as a
+  fallback (Mark's list is ground truth, not a guess to fall back from).
+- **Found and fixed the actual cause of the cron never self-firing**: as of
+  13:07 UTC on 2026-08-04, checking Actions history showed **all 11 runs
+  ever logged for this workflow were `workflow_dispatch`, zero were
+  `schedule`** - the scheduled trigger had never fired even once, on either
+  the old `:00` or the `:05` cron. Root cause wasn't GitHub congestion (the
+  earlier theory) - it's that `08:05`/`14:05 UTC` was written assuming
+  Mark's local time is GMT year-round, but the UK is on **BST (UTC+1)**
+  roughly late March-late October, so at the time of checking (August) that
+  schedule was actually firing at 09:05/15:05 *local*, not 8am/2pm -
+  nothing had failed to fire, Mark just hadn't reached the actual (later)
+  fire time yet when he checked at "2pm". Fixed properly rather than just
+  re-timed: the workflow now has 4 cron entries (`5 7/8/13/14 * * *` UTC -
+  both UTC hours that "8am"/"2pm Europe/London" can map to across the DST
+  switch) and a new first step, `Check local time window` (job id `gate`),
+  that reads the actual `TZ=Europe/London` wall-clock hour at run time and
+  only lets the remaining steps run if it's genuinely 08:xx or 14:xx local
+  - `workflow_dispatch` runs always skip the check. This means the
+  intended local times stay correct automatically across every future
+  BST/GMT switch with no manual cron edit twice a year. **Not yet
+  confirmed against a real unattended fire** - see "Outstanding" below.
 
 See "Outstanding / not yet done" for what's actually still open.
 
@@ -129,7 +156,7 @@ scraper/
   send_email.py     smtplib SMTP_SSL send via Gmail app password
 run_pipeline.py      Entry point: scrape -> append history -> build xlsx -> email
 requirements.txt     playwright, openpyxl
-.github/workflows/comp-set-report.yml   The real scheduled workflow (5 8,14 * * * UTC - not :00, see "Current status")
+.github/workflows/comp-set-report.yml   The real scheduled workflow (4 cron entries + a local-time gate step for BST/GMT, see "Current status")
 data/history.csv, data/latest_comp_set.xlsx   Committed by the workflow each run
 README.md            Beginner-friendly GitHub setup instructions for Mark
 ```
@@ -260,15 +287,21 @@ guessed) - see below.
 
 ## Outstanding / not yet done
 
-1. **Confirm the moved cron actually self-fires.** The 08:00/14:00 → 08:05/
-   14:05 change (see "Current status") has only been validated via a manual
-   `workflow_dispatch`, not a real unattended `schedule` trigger. Check
-   Actions history (`mcp__github__actions_list`, method
+1. **Confirm the 4-cron/gate-step schedule actually self-fires and lands at
+   the right local time.** As of this fix landing (2026-08-04, ~13:xx UTC),
+   zero `schedule`-triggered runs have ever completed for this workflow -
+   every run in Actions history is `workflow_dispatch`. This may just be
+   because nobody had waited past the (corrected, BST-aware) fire time yet
+   when last checked, but it hasn't been positively confirmed either way.
+   Check Actions history (`mcp__github__actions_list`, method
    `list_workflow_runs`, filter `{"event": "schedule"}` on
-   `comp-set-report.yml`) after the next 08:05 or 14:05 UTC passes - if it's
-   still empty, the 5-minute offset wasn't enough and this needs escalating
-   (try a bigger offset, or ask Mark whether GitHub Actions cron reliability
-   is acceptable for a twice-daily business report at all).
+   `comp-set-report.yml`) after the next 08:xx/14:xx Europe/London passes -
+   confirm (a) a `schedule` run appears at all, and (b) its "Check local
+   time window" step actually let the real work through (i.e. `should_run`
+   was `true` and `data/history.csv` got a new row) rather than skipping.
+   Two of every day's four scheduled firings are *expected* to skip by
+   design (the "wrong" DST-offset entry) - only investigate if BOTH firings
+   near a target local hour skip, or if none run at all.
 2. **Full emailed report visual check**: nobody has eyeballed the actual
    emailed `.xlsx` from a real run since PR #4's tier-matching/colour fixes
    merged, to confirm the "Equivalent St Mungo's room" column and the new
