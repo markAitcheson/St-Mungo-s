@@ -90,8 +90,9 @@ Don't wait for the schedule - test it now:
 6. If it fails (red cross), click into the run, click the `run-report` job,
    and read the red-highlighted step - see **Troubleshooting** below.
 
-Once step 4 succeeds, you're done - it will now run automatically at 08:00
-and 14:00 GMT every day without you doing anything.
+Once step 4 succeeds, you're done - it will now run automatically at 08:05
+and 14:05 GMT every day without you doing anything (a few minutes past the
+hour, not on it - see the schedule comment in `comp-set-report.yml`).
 
 ---
 

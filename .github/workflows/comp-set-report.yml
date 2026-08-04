@@ -3,10 +3,13 @@ name: Glasgow comp set report
 on:
   schedule:
     # Times are UTC. GMT is a fixed UTC+0 offset (it doesn't observe
-    # daylight saving, unlike BST), so 08:00/14:00 GMT = 08:00/14:00 UTC
-    # year-round - see README.md "Changing the schedule".
-    - cron: "0 8 * * *"
-    - cron: "0 14 * * *"
+    # daylight saving, unlike BST), so 08:05/14:05 GMT = 08:05/14:05 UTC
+    # year-round - see README.md "Changing the schedule". Run at 5 past
+    # rather than on the hour - GitHub's own docs warn that :00 is the
+    # most congested slot for scheduled workflows and can be delayed or
+    # dropped, which is what happened to the very first 08:00 run.
+    - cron: "5 8 * * *"
+    - cron: "5 14 * * *"
   workflow_dispatch: {}
 
 permissions:
