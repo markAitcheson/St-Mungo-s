@@ -73,19 +73,43 @@ Two more rounds landed later the same day, both pushed straight to default
   only lets the remaining steps run if it's genuinely 08:xx or 14:xx local
   - `workflow_dispatch` runs always skip the check. This means the
   intended local times stay correct automatically across every future
-  BST/GMT switch with no manual cron edit twice a year. **Not yet
-  confirmed against a real unattended fire** - see "Outstanding" below.
+  BST/GMT switch with no manual cron edit twice a year.
+
+**That gate-step fix turned out not to be the real problem.** Over
+2026-08-04/05, checking Actions history repeatedly showed GitHub's own
+`schedule` trigger for this workflow is **fundamentally unreliable**, not
+just mistimed: it has fired at essentially random moments unrelated to any
+of its 4 cron entries (e.g. 16:16 UTC and 09:41/10:38 UTC on runs where the
+nearest real cron entry was over an hour away), and on several other
+occasions didn't fire at all through an entire target window. The gate
+step itself works correctly every time it's tested (it always makes the
+right should-run/should-skip call) - the bug is entirely in whether
+GitHub's scheduler invokes the workflow at all, which is outside this
+repo's control. **A first attempted fix - a recurring Claude Code Remote
+Routine (`create_trigger` with a `cron_expression`) calling
+`workflow_dispatch` on a schedule instead - also failed**, dead on its very
+first scheduled occurrence (15+ minutes overdue with zero movement in
+`last_fired_at`/`next_run_at`). **The fix that's actually live now** is a
+self-perpetuating chain of one-off `send_later` calls, which is a
+different (and so far reliable) mechanism - see "Automated triggering
+mechanism" below, this is important to read before touching anything
+schedule-related.
 
 See "Outstanding / not yet done" for what's actually still open.
 
 ## Decisions already made (don't re-litigate these without reason)
 
-- **Automation engine: GitHub Actions**, not a Claude Code Routine/session.
-  Reasoning: an unattended twice-daily job needs to run whether or not this
-  session/environment exists at the time; GitHub Actions runners have full
-  internet access (this Claude Code sandbox's own network is locked to an
-  allowlist - see "Environment quirk" below) and cost nothing at this
-  volume.
+- **Execution engine: GitHub Actions** (the actual scrape/build/email/commit
+  work). Reasoning: GitHub Actions runners have full internet access (this
+  Claude Code sandbox's own network is locked to an allowlist - see
+  "Environment quirk" below) and cost nothing at this volume. **This part
+  hasn't changed.**
+- **Triggering mechanism: a Claude Code Remote `send_later` chain**, not
+  GitHub's own `schedule` cron. This *has* changed since the decision above
+  was first made - GitHub's own cron proved too unreliable to trust (see
+  "Automated triggering mechanism" below for the full story and how to
+  manage it). GitHub Actions still does 100% of the real work; it's just no
+  longer trusted to wake itself up on time.
 - **Output format: a real .xlsx file** ("Option A" - not yet the "Option B"
   live OneDrive-via-Graph-API upgrade that was discussed and deferred).
   Mark has the Claude for Excel add-in and will open the workbook there for
@@ -144,6 +168,83 @@ Also: raw.githubusercontent.com is CDN-cached for a few minutes - when
 checking freshly-pushed file contents, fetch via
 `api.github.com/repos/.../contents/<path>?ref=<commit-sha>` (base64-decoded)
 instead, or you'll read stale data.
+
+## Automated triggering mechanism (read this before touching scheduling)
+
+**This mechanism lives outside this git repo entirely** - it's Claude Code
+Remote scheduled-trigger state tied to a specific Claude session, not
+anything committed to `markAitcheson/St-Mungo-s`. A fresh session reading
+only the repo files would have no way to discover it exists - that's the
+whole reason this section is here.
+
+**Why it exists**: GitHub Actions' own `schedule` cron trigger on
+`comp-set-report.yml` is unreliable for this repo - confirmed by repeatedly
+checking Actions history and finding `schedule`-triggered runs firing at
+essentially random times (up to 2+ hours late, or landing at UTC hours
+matching none of the workflow's 4 cron entries), or not firing at all
+through entire target windows. A first fix attempt - a recurring Claude
+Code Remote Routine (`mcp__Claude_Code_Remote__create_trigger` with a
+`cron_expression`) calling `workflow_dispatch` on the same 4-times-daily
+schedule - was tried as a replacement, but it never fired even once on its
+first scheduled occurrence either (15+ min overdue, `last_fired_at`/
+`next_run_at` frozen). By contrast, **one-off** `send_later` /
+`create_trigger(run_once_at=...)` fires in this account have been reliable
+and prompt every time (within ~1-2 min of target). So the current
+mechanism deliberately avoids recurring cron entirely and chains one-off
+fires instead.
+
+**How it works**: each link is a one-off `send_later` call scheduled for
+one of 4 daily UTC slots - `07:05`, `08:05`, `13:05`, `14:05` (same
+BST/GMT-covering pair-of-candidate-hours logic as the workflow's own
+`Check local time window` gate step - see the cron comment in
+`comp-set-report.yml`). When a link fires, in this exact order:
+1. **First, unconditionally** (before anything else, and even if step 3
+   below fails): schedule the *next* link in the 07:05→08:05→13:05→14:05
+   cycle (wrapping to 07:05 the next UTC day after 14:05), passing the same
+   instruction text forward so the chain is self-identical and perpetuates
+   indefinitely. This ordering is deliberate - a failure in the actual
+   trigger step must never be able to kill future firings.
+2. Check the real `TZ=Europe/London` local hour.
+3. If it's `08` or `14`: call `mcp__github__actions_run_trigger`
+   (`run_workflow`, owner `markAitcheson`, repo `St-Mungo-s`, workflow_id
+   `comp-set-report.yml`, ref `claude/student-accommodation-access-5v5j44`).
+   Otherwise do nothing - 2 of every 4 links are expected to skip, that's
+   correct, not a bug.
+4. Stay silent on routine fires/skips. Message Mark only on genuine
+   failure (the GitHub API call errors, or - especially - re-arming the
+   chain itself failed, since that would silently kill all future
+   automation and Mark needs to know if it reverts to manual triggering).
+
+**Critical caveat - session binding**: these triggers are bound via
+`persistent_session_id` to *this specific Claude session*
+(`session_01BjpHEgZoy5hGJU4FxncuZQ`), not to "whichever session next reads
+this repo." A fresh session picking up this project does **not**
+automatically inherit the chain into its own conversation - the chain keeps
+firing into the original session regardless of who's reading this file.
+If that original session ever becomes unavailable (deleted, expired), the
+chain dies silently with no error visible from the repo side. To check
+whether it's alive: call `mcp__Claude_Code_Remote__list_triggers` (works
+from any session on the account, not just the bound one) and look for a
+trigger named `send_later ...` whose `next_run_at` is a plausible upcoming
+07:05/08:05/13:05/14:05 UTC slot and keeps advancing over time. If it looks
+stalled (a past `next_run_at` that never updates, same symptom the broken
+recurring Routine showed), the chain has died - recreate it (bound to
+whatever session is doing the recreating) rather than trying to resume the
+old one, following the same design above.
+
+**As of 2026-08-05**: two triggers are in flight - a one-off validation
+test at 14:01 UTC that unconditionally fires `workflow_dispatch` (no
+time gate, since it's a deliberate manual-style test, not a real cadence
+slot) and reports success/failure back to Mark directly, and the actual
+chain's first link at 14:05 UTC (expected to correctly skip, since that's
+3pm BST, and silently re-arm for tomorrow 07:05 UTC). Neither has fired
+yet as of this note - **check `list_triggers` and recent Actions runs to
+confirm both landed as expected before assuming this works.**
+
+GitHub's own `schedule:` cron entries are still left in
+`comp-set-report.yml` as harmless redundancy (they self-skip via the gate
+on the rare/random occasions they do fire) - not removed, just no longer
+the trusted primary mechanism.
 
 ## Repo structure
 
@@ -287,38 +388,42 @@ guessed) - see below.
 
 ## Outstanding / not yet done
 
-1. **Confirm the 4-cron/gate-step schedule actually self-fires and lands at
-   the right local time.** As of this fix landing (2026-08-04, ~13:xx UTC),
-   zero `schedule`-triggered runs have ever completed for this workflow -
-   every run in Actions history is `workflow_dispatch`. This may just be
-   because nobody had waited past the (corrected, BST-aware) fire time yet
-   when last checked, but it hasn't been positively confirmed either way.
-   Check Actions history (`mcp__github__actions_list`, method
-   `list_workflow_runs`, filter `{"event": "schedule"}` on
-   `comp-set-report.yml`) after the next 08:xx/14:xx Europe/London passes -
-   confirm (a) a `schedule` run appears at all, and (b) its "Check local
-   time window" step actually let the real work through (i.e. `should_run`
-   was `true` and `data/history.csv` got a new row) rather than skipping.
-   Two of every day's four scheduled firings are *expected* to skip by
-   design (the "wrong" DST-offset entry) - only investigate if BOTH firings
-   near a target local hour skip, or if none run at all.
-2. **Full emailed report visual check**: nobody has eyeballed the actual
+1. **Confirm the new `send_later` chain (see "Automated triggering
+   mechanism" above) is actually perpetuating itself reliably.** As of
+   2026-08-05 it's brand new and largely unproven - only the very first
+   link had fired (a one-off connectivity test) before this note was
+   written. Check `mcp__Claude_Code_Remote__list_triggers` and Actions
+   history over the next few days: confirm real `workflow_dispatch` runs
+   land close to 08:xx/14:xx Europe/London (not just close to a UTC cron
+   time), confirm the chain keeps advancing (`next_run_at` moves forward
+   each day, doesn't freeze), and confirm Mark is actually getting two
+   reports a day without manually triggering. If the chain ever goes
+   quiet, see the "session binding" caveat above for how to check whether
+   it died and needs recreating.
+2. GitHub's own `schedule` cron trigger reliability issue is **understood
+   but not fixable from this repo's side** - it's GitHub-platform behavior,
+   not a config bug (confirmed: correct default branch, valid YAML, active
+   workflow state, and it *still* fires at random unrelated times or not at
+   all). Nothing further to do here unless GitHub's behavior changes or
+   Mark wants to escalate to GitHub support - the `send_later` chain is the
+   actual fix, this cron is just inert redundancy now.
+3. **Full emailed report visual check**: nobody has eyeballed the actual
    emailed `.xlsx` from a real run since PR #4's tier-matching/colour fixes
    merged, to confirm the "Equivalent St Mungo's room" column and the new
    red-below/green-above colouring render as expected in Excel (not just in
    the underlying data/tests). Quick to check: open the attachment from the
    next real send, or trigger manually and check
    `data/latest_comp_set.xlsx` as committed by the workflow.
-3. **Not started**: "Option B" from earlier discussion - a live workbook in
+4. **Not started**: "Option B" from earlier discussion - a live workbook in
    OneDrive updated in place via Microsoft Graph API, instead of a
    committed file per run. Only worth revisiting if Mark asks for it later;
    requires an Azure app registration, more setup than the current
    approach.
-4. **Watch for recurring sold-out swings**: if Canvas Silver/Platinum
+5. **Watch for recurring sold-out swings**: if Canvas Silver/Platinum
    en-suite (or any other room) stays sold out indefinitely or flickers
    in/out a lot, that's just real-world inventory - no code change needed
    unless Mark asks for different handling (e.g. a "days sold out" stat).
-5. **Watch the fresh baseline settle in.** Since `data/history.csv` was
+6. **Watch the fresh baseline settle in.** Since `data/history.csv` was
    just cleared, the next couple of runs will have no "vs last report" or
    meaningful "vs baseline" figures yet (nothing to compare against) - this
    is expected, not a bug, until at least 2 runs have landed post-clear.
@@ -352,3 +457,15 @@ above): write a throwaway `scraper/_diag_<name>.py` script plus a matching
 revert the diagnostic push with a follow-up commit once you've confirmed
 what you needed - real fixes land via a normal PR afterward, never by
 leaving the diagnostic commits on default.
+
+To check whether the `send_later` triggering chain (see "Automated
+triggering mechanism" above) is still alive, from any session:
+```
+mcp__Claude_Code_Remote__list_triggers
+```
+Look for the most recent `send_later ...`-named entry - a healthy chain
+has a `next_run_at` sitting on a near-future 07:05/08:05/13:05/14:05 UTC
+slot that keeps moving forward each time you check. A frozen/past
+`next_run_at` means it died - recreate it via `mcp__Claude_Code_Remote__
+send_later`, following the exact re-arm-first design described above,
+rather than trying to resurrect the old trigger_id.
