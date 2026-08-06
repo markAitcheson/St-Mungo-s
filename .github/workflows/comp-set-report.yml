@@ -34,21 +34,59 @@ jobs:
         id: gate
         run: |
           # Manual runs (workflow_dispatch) always proceed. Scheduled runs
-          # only proceed if this firing is the one that actually lands on
-          # 8am or 2pm Europe/London right now - see the "on.schedule"
-          # comment above for why there are 4 cron entries for 2 target
-          # times.
+          # only proceed if this firing lands in the intended morning
+          # (targeting 8am) or afternoon (targeting 2pm) Europe/London
+          # window - see the "on.schedule" comment above for why there are
+          # 4 cron entries for 2 target times.
+          #
+          # GitHub has been observed delaying these low-frequency schedule
+          # triggers by 2-4 hours, so an exact "local_hour == 08" match
+          # was causing every scheduled run to be skipped. The windows
+          # below are widened to absorb that delay: morning covers
+          # 07:00-12:59 local, afternoon covers 13:00-23:59 local. To
+          # avoid sending the report twice if more than one delayed cron
+          # firing lands in the same window, we also skip if a report has
+          # already been sent today within that same window (checked via
+          # the last timestamp committed to data/history.csv).
           if [ "${{ github.event_name }}" != "schedule" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
           local_hour=$(TZ=Europe/London date +%H)
-          if [ "$local_hour" = "08" ] || [ "$local_hour" = "14" ]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          local_hour=$((10#$local_hour))
+          local_date=$(TZ=Europe/London date +%F)
+
+          if [ "$local_hour" -ge 7 ] && [ "$local_hour" -lt 13 ]; then
+            period="morning"
+          elif [ "$local_hour" -ge 13 ]; then
+            period="afternoon"
           else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping - it's ${local_hour}:xx in Europe/London, not the intended 08:xx/14:xx window."
+            period=""
           fi
+
+          if [ -z "$period" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping - it's ${local_hour}:xx in Europe/London, outside both report windows."
+            exit 0
+          fi
+
+          last_ts=$(tail -n +2 data/history.csv | tail -1 | cut -d, -f1)
+          if [ -n "$last_ts" ]; then
+            last_date=$(TZ=Europe/London date -d "$last_ts" +%F 2>/dev/null || true)
+            last_hour=$(TZ=Europe/London date -d "$last_ts" +%H 2>/dev/null || true)
+            last_hour=$((10#$last_hour))
+            if [ "$last_date" = "$local_date" ]; then
+              if { [ "$period" = "morning" ] && [ "$last_hour" -ge 7 ] && [ "$last_hour" -lt 13 ]; } || \
+                 { [ "$period" = "afternoon" ] && [ "$last_hour" -ge 13 ]; }; then
+                echo "should_run=false" >> "$GITHUB_OUTPUT"
+                echo "Skipping - already sent the ${period} report today at ${last_ts}."
+                exit 0
+              fi
+            fi
+          fi
+
+          echo "should_run=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-python@v5
         if: steps.gate.outputs.should_run == 'true'
