@@ -2,23 +2,23 @@ name: Glasgow comp set report
 
 on:
   schedule:
-    # cron times are always UTC and GitHub Actions can't express "8am/2pm
+    # cron times are always UTC and GitHub Actions can't express "9am/7pm
     # Europe/London" directly - the UK is on BST (UTC+1) roughly late March
     # to late October and GMT (UTC+0) the rest of the year, so the UTC hour
-    # that means "8am local" changes twice a year. Rather than requiring a
+    # that means "9am local" changes twice a year. Rather than requiring a
     # manual edit at every clock change, this fires at BOTH candidate UTC
-    # hours for each target local time (7 and 8 for the morning report, 13
-    # and 14 for the afternoon one) - the "Check local time window" step
-    # below then skips the run that doesn't actually land on 8am/2pm
+    # hours for each target local time (8 and 9 for the morning report, 18
+    # and 19 for the evening one) - the "Check local time window" step
+    # below then skips the run that doesn't actually land on 9am/7pm
     # Europe/London, so exactly one real run happens per target time,
     # automatically correct across the DST switch. Run at 5 past rather
     # than on the hour - GitHub's own docs warn that :00 is the most
     # congested slot for scheduled workflows and can be delayed or dropped,
     # which is what happened to the very first 08:00 run.
-    - cron: "5 7 * * *"
     - cron: "5 8 * * *"
-    - cron: "5 13 * * *"
-    - cron: "5 14 * * *"
+    - cron: "5 9 * * *"
+    - cron: "5 18 * * *"
+    - cron: "5 19 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -35,15 +35,15 @@ jobs:
         run: |
           # Manual runs (workflow_dispatch) always proceed. Scheduled runs
           # only proceed if this firing lands in the intended morning
-          # (targeting 8am) or afternoon (targeting 2pm) Europe/London
+          # (targeting 9am) or evening (targeting 7pm) Europe/London
           # window - see the "on.schedule" comment above for why there are
           # 4 cron entries for 2 target times.
           #
           # GitHub has been observed delaying these low-frequency schedule
-          # triggers by 2-4 hours, so an exact "local_hour == 08" match
+          # triggers by 2-4 hours, so an exact "local_hour == 09" match
           # was causing every scheduled run to be skipped. The windows
           # below are widened to absorb that delay: morning covers
-          # 07:00-12:59 local, afternoon covers 13:00-23:59 local. To
+          # 07:00-14:59 local, evening covers 15:00-23:59 local. To
           # avoid sending the report twice if more than one delayed cron
           # firing lands in the same window, we also skip if a report has
           # already been sent today within that same window (checked via
@@ -57,10 +57,10 @@ jobs:
           local_hour=$((10#$local_hour))
           local_date=$(TZ=Europe/London date +%F)
 
-          if [ "$local_hour" -ge 7 ] && [ "$local_hour" -lt 13 ]; then
+          if [ "$local_hour" -ge 7 ] && [ "$local_hour" -lt 15 ]; then
             period="morning"
-          elif [ "$local_hour" -ge 13 ]; then
-            period="afternoon"
+          elif [ "$local_hour" -ge 15 ]; then
+            period="evening"
           else
             period=""
           fi
@@ -77,8 +77,8 @@ jobs:
             last_hour=$(TZ=Europe/London date -d "$last_ts" +%H 2>/dev/null || true)
             last_hour=$((10#$last_hour))
             if [ "$last_date" = "$local_date" ]; then
-              if { [ "$period" = "morning" ] && [ "$last_hour" -ge 7 ] && [ "$last_hour" -lt 13 ]; } || \
-                 { [ "$period" = "afternoon" ] && [ "$last_hour" -ge 13 ]; }; then
+              if { [ "$period" = "morning" ] && [ "$last_hour" -ge 7 ] && [ "$last_hour" -lt 15 ]; } || \
+                 { [ "$period" = "evening" ] && [ "$last_hour" -ge 15 ]; }; then
                 echo "should_run=false" >> "$GITHUB_OUTPUT"
                 echo "Skipping - already sent the ${period} report today at ${last_ts}."
                 exit 0
