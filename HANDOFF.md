@@ -115,18 +115,32 @@ scheduling is back to GitHub Actions alone.** Two problems surfaced:
 The actual fix instead: widen the gate step (`Check local time window` in
 `comp-set-report.yml`) so it doesn't need GitHub's cron to fire at a
 precise minute at all. It now accepts **any** firing that lands in a wide
-morning (07:00-12:59 Europe/London) or afternoon (13:00-23:59) window, and
-dedupes against the last timestamp in `data/history.csv` so it doesn't
-double-send if more than one delayed cron firing lands in the same window.
-Since GitHub's schedule trigger has reliably fired *at some point* within a
-few hours of every target time so far (just not at a predictable minute),
-widening the acceptance window rather than fighting the timing is what
-makes this self-contained in the repo again - no external session, no
-third-party service, nothing outside GitHub Actions. **Do not recreate the
-`send_later` chain** without a good new reason - the section below is kept
-for historical context (and in case GitHub's cron ever stops firing at all,
-in which case some external nudge would be needed again), not as a live
+morning or evening Europe/London window (see exact hours below - these
+moved once more the same day, see next paragraph), and dedupes against the
+last timestamp in `data/history.csv` so it doesn't double-send if more than
+one delayed cron firing lands in the same window. Since GitHub's schedule
+trigger has reliably fired *at some point* within a few hours of every
+target time so far (just not at a predictable minute), widening the
+acceptance window rather than fighting the timing is what makes this
+self-contained in the repo again - no external session, no third-party
+service, nothing outside GitHub Actions. **Do not recreate the `send_later`
+chain** without a good new reason - the section below is kept for
+historical context (and in case GitHub's cron ever stops firing at all, in
+which case some external nudge would be needed again), not as a live
 mechanism.
+
+**Same-day follow-up: schedule moved from 8am/2pm to 9am/7pm.** Mark
+requested this specifically so a real evening firing would land the same
+night, letting him confirm the widened-gate fix works without waiting
+until the next morning. Cron entries are now `5 8/9/18/19 * * *` UTC
+(covering 9am and 7pm Europe/London across both BST and GMT). The gate's
+windows moved to match: morning is `07:00-14:59` local (period="morning"),
+evening is `15:00-23:59` local (period="evening"), with the same
+`data/history.csv`-timestamp dedup as before. If you need to change the
+target times again, update all three places together: the 4 `cron:` lines,
+the `period=` if/elif thresholds, and the dedup `last_hour` comparison -
+all three must stay consistent with each other and with whatever the new
+target local times are, or the gate will silently misclassify runs.
 
 See "Outstanding / not yet done" for what's actually still open.
 
@@ -430,11 +444,14 @@ guessed) - see below.
    manual `workflow_dispatch` on the same code. As of this note, the fix
    had only been exercised by a manual dispatch (13:25 UTC on 2026-08-06,
    succeeded) - no `schedule`-triggered run had yet landed and passed the
-   new gate. Check Actions history over the next few days for `event:
-   schedule` runs where `Run pipeline` shows `conclusion: success` (not
-   `skipped`), landing at plausible times within the widened windows
-   (07:00-12:59 / 13:00-23:59 Europe/London), one per window per day (the
-   dedup check should prevent a second one in the same window).
+   new gate. The target schedule was also moved same-day from 8am/2pm to
+   9am/7pm (see "Same-day follow-up" above) specifically so an evening
+   firing would land the same night, giving a same-day chance to confirm
+   this. Check Actions history for `event: schedule` runs where `Run
+   pipeline` shows `conclusion: success` (not `skipped`), landing at
+   plausible times within the widened windows (07:00-14:59 / 15:00-23:59
+   Europe/London), one per window per day (the dedup check should prevent
+   a second one in the same window).
 2. GitHub's own `schedule` cron trigger's *timing* is **understood but not
    fixable from this repo's side** - it's GitHub-platform behavior, not a
    config bug (confirmed: correct default branch, valid YAML, active

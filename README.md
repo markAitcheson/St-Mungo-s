@@ -90,13 +90,16 @@ Don't wait for the schedule - test it now:
 6. If it fails (red cross), click into the run, click the `run-report` job,
    and read the red-highlighted step - see **Troubleshooting** below.
 
-Once step 4 succeeds, you're done - it will now run automatically at 8am and
-2pm UK time every day without you doing anything (a few minutes past the
+Once step 4 succeeds, you're done - it will now run automatically at 9am and
+7pm UK time every day without you doing anything (a few minutes past the
 hour, not on it - see the schedule comment in `comp-set-report.yml`). Under
 the hood the workflow actually wakes up 4 times a day and checks the current
-UK time, only doing real work on the 2 firings that land on 8am/2pm - that's
-how it stays correct across the BST/GMT clock change each year without
-needing a manual edit twice a year.
+UK time, only doing real work on the 2 firings that land closest to 9am/7pm
+- that's how it stays correct across the BST/GMT clock change each year
+without needing a manual edit twice a year. It also tolerates GitHub firing
+the schedule late (see "Current status" in `HANDOFF.md`) by accepting any
+firing within a several-hour window around each target time, not just an
+exact match.
 
 ---
 
