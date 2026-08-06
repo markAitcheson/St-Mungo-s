@@ -89,11 +89,44 @@ repo's control. **A first attempted fix - a recurring Claude Code Remote
 Routine (`create_trigger` with a `cron_expression`) calling
 `workflow_dispatch` on a schedule instead - also failed**, dead on its very
 first scheduled occurrence (15+ minutes overdue with zero movement in
-`last_fired_at`/`next_run_at`). **The fix that's actually live now** is a
-self-perpetuating chain of one-off `send_later` calls, which is a
-different (and so far reliable) mechanism - see "Automated triggering
-mechanism" below, this is important to read before touching anything
-schedule-related.
+`last_fired_at`/`next_run_at`). The fix that went live next was a
+self-perpetuating chain of one-off `send_later` calls - see below for why
+that was then **abandoned in turn**.
+
+**2026-08-06 update - the `send_later` chain has been abandoned, and
+scheduling is back to GitHub Actions alone.** Two problems surfaced:
+1. It actually died. Checking `mcp__Claude_Code_Remote__list_triggers`
+   found the most recent link had fired (07:10 UTC on 2026-08-06, correctly
+   inside the 8am BST window) but never re-armed itself and never actually
+   called `workflow_dispatch` - no run appears in Actions history anywhere
+   near that time. This is the exact silent-death failure mode the old
+   "Automated triggering mechanism" section below warned about: the chain
+   is bound to one specific Claude session
+   (`persistent_session_id`/`session_01BjpHEgZoy5hGJU4FxncuZQ`), and if that
+   session's container gets reclaimed (these environments reclaim sessions
+   after a period of inactivity), the chain has nothing left to deliver
+   into and just stops, with no error visible from the repo side.
+2. Mark separately ruled out relying on any chat-session-bound mechanism as
+   a matter of policy - he's not willing to have company scheduling depend
+   on whether a particular Claude conversation happens to still be alive
+   (this is also why a third-party scheduler-as-a-service alternative was
+   rejected - not wanting to hand a GitHub token to an outside provider).
+
+The actual fix instead: widen the gate step (`Check local time window` in
+`comp-set-report.yml`) so it doesn't need GitHub's cron to fire at a
+precise minute at all. It now accepts **any** firing that lands in a wide
+morning (07:00-12:59 Europe/London) or afternoon (13:00-23:59) window, and
+dedupes against the last timestamp in `data/history.csv` so it doesn't
+double-send if more than one delayed cron firing lands in the same window.
+Since GitHub's schedule trigger has reliably fired *at some point* within a
+few hours of every target time so far (just not at a predictable minute),
+widening the acceptance window rather than fighting the timing is what
+makes this self-contained in the repo again - no external session, no
+third-party service, nothing outside GitHub Actions. **Do not recreate the
+`send_later` chain** without a good new reason - the section below is kept
+for historical context (and in case GitHub's cron ever stops firing at all,
+in which case some external nudge would be needed again), not as a live
+mechanism.
 
 See "Outstanding / not yet done" for what's actually still open.
 
@@ -104,12 +137,16 @@ See "Outstanding / not yet done" for what's actually still open.
   Claude Code sandbox's own network is locked to an allowlist - see
   "Environment quirk" below) and cost nothing at this volume. **This part
   hasn't changed.**
-- **Triggering mechanism: a Claude Code Remote `send_later` chain**, not
-  GitHub's own `schedule` cron. This *has* changed since the decision above
-  was first made - GitHub's own cron proved too unreliable to trust (see
-  "Automated triggering mechanism" below for the full story and how to
-  manage it). GitHub Actions still does 100% of the real work; it's just no
-  longer trusted to wake itself up on time.
+- **Triggering mechanism: GitHub Actions' own `schedule` cron, with a
+  widened tolerance window.** This has changed twice: first from plain cron
+  to a Claude Code Remote `send_later` chain (because the cron proved too
+  unreliably *timed*), then back again on 2026-08-06 after the chain itself
+  died silently (session-lifetime dependency) and Mark ruled out any
+  session-bound or third-party mechanism on policy grounds. See "Automated
+  triggering mechanism" below for the full story - the current fix widens
+  the gate step's acceptance window instead of requiring an exact fire
+  time, which works because GitHub's cron reliably fires *within a few
+  hours* of target even though it won't fire at a predictable minute.
 - **Output format: a real .xlsx file** ("Option A" - not yet the "Option B"
   live OneDrive-via-Graph-API upgrade that was discussed and deferred).
   Mark has the Claude for Excel add-in and will open the workbook there for
@@ -388,25 +425,27 @@ guessed) - see below.
 
 ## Outstanding / not yet done
 
-1. **Confirm the new `send_later` chain (see "Automated triggering
-   mechanism" above) is actually perpetuating itself reliably.** As of
-   2026-08-05 it's brand new and largely unproven - only the very first
-   link had fired (a one-off connectivity test) before this note was
-   written. Check `mcp__Claude_Code_Remote__list_triggers` and Actions
-   history over the next few days: confirm real `workflow_dispatch` runs
-   land close to 08:xx/14:xx Europe/London (not just close to a UTC cron
-   time), confirm the chain keeps advancing (`next_run_at` moves forward
-   each day, doesn't freeze), and confirm Mark is actually getting two
-   reports a day without manually triggering. If the chain ever goes
-   quiet, see the "session binding" caveat above for how to check whether
-   it died and needs recreating.
-2. GitHub's own `schedule` cron trigger reliability issue is **understood
-   but not fixable from this repo's side** - it's GitHub-platform behavior,
-   not a config bug (confirmed: correct default branch, valid YAML, active
-   workflow state, and it *still* fires at random unrelated times or not at
-   all). Nothing further to do here unless GitHub's behavior changes or
-   Mark wants to escalate to GitHub support - the `send_later` chain is the
-   actual fix, this cron is just inert redundancy now.
+1. **Confirm the widened gate (2026-08-06 fix) actually lets a genuinely
+   unattended `schedule`-triggered run through end-to-end**, not just a
+   manual `workflow_dispatch` on the same code. As of this note, the fix
+   had only been exercised by a manual dispatch (13:25 UTC on 2026-08-06,
+   succeeded) - no `schedule`-triggered run had yet landed and passed the
+   new gate. Check Actions history over the next few days for `event:
+   schedule` runs where `Run pipeline` shows `conclusion: success` (not
+   `skipped`), landing at plausible times within the widened windows
+   (07:00-12:59 / 13:00-23:59 Europe/London), one per window per day (the
+   dedup check should prevent a second one in the same window).
+2. GitHub's own `schedule` cron trigger's *timing* is **understood but not
+   fixable from this repo's side** - it's GitHub-platform behavior, not a
+   config bug (confirmed: correct default branch, valid YAML, active
+   workflow state, and it still fires at unpredictable times, sometimes
+   hours late). The 2026-08-06 fix works around this rather than fixing it:
+   it no longer requires GitHub to fire at a precise minute, only *within*
+   a several-hour window, which it has done reliably every day observed so
+   far. If GitHub ever stops firing the schedule trigger *at all* for an
+   entire day, that would be a new failure mode needing investigation (some
+   external nudge, but not a session-bound one - see the 2026-08-06 note
+   above for why that was ruled out).
 3. **Full emailed report visual check**: nobody has eyeballed the actual
    emailed `.xlsx` from a real run since PR #4's tier-matching/colour fixes
    merged, to confirm the "Equivalent St Mungo's room" column and the new
@@ -458,14 +497,11 @@ revert the diagnostic push with a follow-up commit once you've confirmed
 what you needed - real fixes land via a normal PR afterward, never by
 leaving the diagnostic commits on default.
 
-To check whether the `send_later` triggering chain (see "Automated
-triggering mechanism" above) is still alive, from any session:
-```
-mcp__Claude_Code_Remote__list_triggers
-```
-Look for the most recent `send_later ...`-named entry - a healthy chain
-has a `next_run_at` sitting on a near-future 07:05/08:05/13:05/14:05 UTC
-slot that keeps moving forward each time you check. A frozen/past
-`next_run_at` means it died - recreate it via `mcp__Claude_Code_Remote__
-send_later`, following the exact re-arm-first design described above,
-rather than trying to resurrect the old trigger_id.
+The `send_later` triggering chain is **deprecated as of 2026-08-06** (see
+"Automated triggering mechanism" above) - don't recreate it.
+`mcp__Claude_Code_Remote__list_triggers` will still show old, already-fired
+entries from it; those are inert history, not something to resurrect.
+Scheduling is GitHub Actions-only now - to check it's working, look at
+Actions history for `comp-set-report.yml` and confirm `schedule`-triggered
+runs are landing with `Run pipeline` succeeding (not skipped) roughly twice
+a day.
