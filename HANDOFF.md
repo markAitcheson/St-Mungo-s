@@ -422,11 +422,13 @@ guessed) - see below.
   (`report_excel.py`), so it's visible which of our tiers each competitor
   room is actually being weighed against. That column is colour-coded
   red/green in `report_excel.py` too - red when the competitor is priced
-  *below* St Mungo's, green when *above* (the opposite sense to the "vs
-  last report"/"vs baseline" trend columns, which are red-up/green-down on
-  our own price history, not a competitor comparison). If Mark adds a new
-  competitor room type or wants a pairing changed, update `ROOM_EQUIVALENCE`
-  directly (or add a new `_add_equivalence(...)` call) - don't reintroduce
+  *below* St Mungo's, green when *above*. As of 2026-08-06, this is the
+  same negative-red/positive-green convention used by the "vs last
+  report"/"vs baseline" trend columns (changed from the original
+  red-for-increase/green-for-decrease at Mark's request, so all four %
+  columns in the report read the same way: red = down, green = up). If
+  Mark adds a new competitor room type or wants a pairing changed, update
+  `ROOM_EQUIVALENCE` directly (or add a new `_add_equivalence(...)` call) - don't reintroduce
   heuristic matching.
 - Rooms present in the latest run with **no price** (e.g. sold out, like
   Canvas Silver/Platinum en-suite above) still get a row in the comparison
