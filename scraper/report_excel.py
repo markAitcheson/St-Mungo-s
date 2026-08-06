@@ -9,8 +9,8 @@ from openpyxl.utils import get_column_letter
 
 HEADER_FILL = PatternFill("solid", fgColor="1F2937")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
-UP_FONT = Font(color="B91C1C")    # price increase - red
-DOWN_FONT = Font(color="0B7A3B")  # price decrease - green
+RED_FONT = Font(color="B91C1C")    # negative % - red
+GREEN_FONT = Font(color="0B7A3B")  # positive % - green
 
 
 def _pct(v):
@@ -57,14 +57,14 @@ def build_excel(comparison: list[dict], history: list[dict], path) -> None:
         for col, key in ((6, "pct_vs_prev"), (7, "pct_vs_baseline")):
             val = r.get(key)
             if val:
-                ws.cell(row=excel_row, column=col).font = UP_FONT if val > 0 else DOWN_FONT
+                ws.cell(row=excel_row, column=col).font = RED_FONT if val < 0 else GREEN_FONT
 
-        # vs St Mungo's is a competitor comparison, not our own price trend -
-        # red = priced below us (bad for us), green = priced above us (good
-        # for us), the opposite sense to the trend columns above.
+        # Same negative-red/positive-green convention as the trend columns
+        # above - red = priced below us (bad for us), green = priced above
+        # us (good for us).
         vs_own = r.get("vs_own_pct")
         if vs_own:
-            ws.cell(row=excel_row, column=9).font = UP_FONT if vs_own < 0 else DOWN_FONT
+            ws.cell(row=excel_row, column=9).font = RED_FONT if vs_own < 0 else GREEN_FONT
 
     widths = [30, 32, 12, 12, 42, 16, 16, 30, 16]
     for i, w in enumerate(widths, start=1):
