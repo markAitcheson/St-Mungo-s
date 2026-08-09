@@ -171,19 +171,25 @@ level `conclusion: failure` but job-level `conclusion: cancelled`, no
 (likely expired). It predates this fix so isn't evidence against the new
 code, but nobody has determined what caused it.
 
-**Still outstanding as of this note**: Mark was offered a manual
-`workflow_dispatch` to at least exercise the pipeline + colour fix
-tonight, and to keep watching whether the real unattended schedule ever
-fires (tomorrow's 9am slot is the next natural check). No response yet -
-check the conversation for whether that offer was taken up, and if the
-next session is starting fresh, it's still open: consider proposing it
-again if not otherwise resolved. If you're picking this up cold, the
-single highest-value thing to do is check Actions history for any
-`schedule`-triggered run since 16:09 UTC on 2026-08-06 and see whether it
-finally landed and passed the gate - if so, item 1 below is answered; if
-GitHub still hasn't fired at all, that's a real platform-level "schedule
-trigger stopped working entirely" situation worth raising with Mark
-directly rather than continuing to assume it'll eventually self-correct.
+**RESOLVED as of 2026-08-09: the fix is confirmed working, the Aug 6 no-show
+was a one-off, not a new failure mode.** Checked Actions history at 22:16
+UTC on 2026-08-09: the workflow has fired via `schedule` and correctly
+handled every window since - the very first firing on the new code landed
+at 2026-08-07T09:02 UTC (`Run pipeline: success`, first-of-window, real
+report sent) followed by a delayed duplicate at 10:05 UTC that the dedup
+check correctly skipped (`Run pipeline: skipped`). The same pattern - one
+real send, any delayed duplicates cleanly deduped - repeated for every
+window on 2026-08-07, 08, and 09 (confirmed by spot-checking job steps,
+not just run-level `conclusion`, since a deduped skip and a real send both
+show `conclusion: success` at the run level - only the per-step detail
+tells them apart). **Outstanding item 1 (below) is resolved** - do not
+reopen it without a fresh reason. The 2026-08-06 total no-show now reads
+as an isolated bad night (possibly linked to whatever caused the
+still-unexplained cancelled run that same evening - see item 3 below),
+not evidence that GitHub's scheduler stopped working - three full days of
+clean twice-daily sends since says otherwise. Keep half an eye out
+regardless (see item 2 below), but this no longer needs active
+babysitting.
 
 See "Outstanding / not yet done" for what's actually still open.
 
@@ -484,34 +490,28 @@ guessed) - see below.
 
 ## Outstanding / not yet done
 
-1. **Still not confirmed: the widened gate has never been exercised by a
-   genuinely unattended `schedule`-triggered run on the current code.**
-   Checked at 23:21 UTC on 2026-08-06 (after the evening window had
-   closed): GitHub had not fired the workflow *at all* since 16:09 UTC,
-   spanning both new cron slots (18:05/19:05 UTC) and the full window - see
-   "2026-08-06 night" above for the full finding. The two runs that did
-   fire earlier that day both ran on stale code (pre-dating the 9am/7pm
-   change and the colour fix) and don't count. **Next step for whoever
-   picks this up**: check Actions history for any `schedule` run since
-   16:09 UTC on 2026-08-06 - if one has landed and `Run pipeline` shows
-   `conclusion: success` (not `skipped`), this item is resolved; if
-   GitHub still hasn't fired at all across another full window (e.g.
-   tomorrow's 9am slot also no-shows), treat that as confirmation of item
-   2 below rather than a fluke, and raise it with Mark directly.
-2. **GitHub's `schedule` trigger may not just be mistimed - it may
-   sometimes not fire at all.** Previously understood as unpredictable
-   *timing* (hours late but eventually firing); the night of 2026-08-06
-   was the first time an entire target window closed with zero firings,
-   which is a materially worse failure mode than what the widened-gate fix
-   was designed to absorb (that fix only helps if GitHub fires *at some
-   point* in the window - it can't help if GitHub doesn't fire at all).
-   This is GitHub-platform behavior, not a config bug (confirmed: correct
-   default branch, valid YAML, active workflow state). If this repeats
-   across multiple windows, the widened-gate approach may not be
-   sufficient on its own and Mark may need to decide on a fallback (a
-   reminder to manually trigger, or revisiting some form of external
-   nudge that isn't session-bound - see the 2026-08-06 "send_later
-   abandoned" note above for why a chat-session-bound one was ruled out).
+1. ~~Confirm the widened gate lets a genuinely unattended `schedule`-run
+   through end-to-end.~~ **RESOLVED 2026-08-09** - confirmed via job-step
+   detail (not just run-level `conclusion`, since a deduped skip also
+   shows `success`): first real send on the new code was
+   2026-08-07T09:02 UTC (`Run pipeline: success`), and the same
+   one-real-send-plus-clean-dedup pattern held for every morning/evening
+   window through 2026-08-09. See "RESOLVED as of 2026-08-09" above for
+   the full evidence. No action needed unless it regresses.
+2. **Watch for a repeat of the 2026-08-06 total no-show** (GitHub not
+   firing the `schedule` trigger *at all* through an entire window, worse
+   than the merely-late firings the widened-gate fix was designed to
+   absorb - that fix only helps if GitHub fires *at some point* in the
+   window). Three clean days since (Aug 7-9) suggest Aug 6 was an isolated
+   bad night rather than a new persistent failure mode, but it's only been
+   watched for a few days - if it recurs, that's confirmation it's a real
+   pattern, not a fluke, and worth raising with Mark: the widened-gate
+   approach can't help if GitHub doesn't fire at all, and he may want to
+   decide on a fallback (a reminder to check manually, or revisiting some
+   form of external nudge that isn't session-bound - see the 2026-08-06
+   "send_later abandoned" note above for why a chat-session-bound one was
+   ruled out). This is GitHub-platform behavior, not a config bug
+   (confirmed: correct default branch, valid YAML, active workflow state).
 3. **Unexplained**: the 16:09 UTC run on 2026-08-06 (run `31118808728`,
    job `92674747743`) - run-level `conclusion: failure`, job-level
    `conclusion: cancelled`, no `steps` array recorded, ran for ~15 minutes
