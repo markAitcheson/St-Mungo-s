@@ -142,6 +142,49 @@ the `period=` if/elif thresholds, and the dedup `last_hour` comparison -
 all three must stay consistent with each other and with whatever the new
 target local times are, or the gate will silently misclassify runs.
 
+**Same day, later: colour convention changed on the two trend columns.**
+Mark asked for "vs last report" and "vs baseline" to use the same
+negative-red/positive-green convention as "vs St Mungo's" (previously they
+were red-for-increase/green-for-decrease - the opposite sign). Fixed in
+`scraper/report_excel.py`: `UP_FONT`/`DOWN_FONT` renamed to
+`RED_FONT`/`GREEN_FONT` (old names implied "price direction," which no
+longer applies uniformly), and the ternary on the trend columns flipped
+from `val > 0` to `val < 0`. Verified by actually building a workbook with
+`build_excel()` and inspecting the applied font colours on both positive
+and negative sample values, not just reading the code. All three % columns
+now read the same way: red = down, green = up.
+
+**2026-08-06 night: the schedule test came back negative - GitHub never
+fired the workflow at all.** Checked Actions history at 23:21 UTC (after
+the evening window had closed at 22:59 UTC): the most recent run of *any*
+kind was at 16:09:27 UTC, and it - along with the one before it at
+15:22:19 UTC - ran on commit `bd0e6b9`, i.e. **before** the 9am/7pm change
+and the colour fix even landed on default. Neither tests this fix. Since
+the 9am/7pm change went live, GitHub's `schedule` trigger has not invoked
+the workflow even once, through both new cron slots (18:05 and 19:05 UTC)
+and the entire evening window - not late, just absent. This is the
+specific failure mode outstanding-item 2 (below) predicted might happen;
+now it has, for real, on a whole window. Separately, the 16:09 UTC run is
+itself an unexplained anomaly worth a second look if anyone has time: run-
+level `conclusion: failure` but job-level `conclusion: cancelled`, no
+`steps` recorded, ran ~15 minutes before stopping, and its logs 404
+(likely expired). It predates this fix so isn't evidence against the new
+code, but nobody has determined what caused it.
+
+**Still outstanding as of this note**: Mark was offered a manual
+`workflow_dispatch` to at least exercise the pipeline + colour fix
+tonight, and to keep watching whether the real unattended schedule ever
+fires (tomorrow's 9am slot is the next natural check). No response yet -
+check the conversation for whether that offer was taken up, and if the
+next session is starting fresh, it's still open: consider proposing it
+again if not otherwise resolved. If you're picking this up cold, the
+single highest-value thing to do is check Actions history for any
+`schedule`-triggered run since 16:09 UTC on 2026-08-06 and see whether it
+finally landed and passed the gate - if so, item 1 below is answered; if
+GitHub still hasn't fired at all, that's a real platform-level "schedule
+trigger stopped working entirely" situation worth raising with Mark
+directly rather than continuing to assume it'll eventually self-correct.
+
 See "Outstanding / not yet done" for what's actually still open.
 
 ## Decisions already made (don't re-litigate these without reason)
@@ -441,47 +484,60 @@ guessed) - see below.
 
 ## Outstanding / not yet done
 
-1. **Confirm the widened gate (2026-08-06 fix) actually lets a genuinely
-   unattended `schedule`-triggered run through end-to-end**, not just a
-   manual `workflow_dispatch` on the same code. As of this note, the fix
-   had only been exercised by a manual dispatch (13:25 UTC on 2026-08-06,
-   succeeded) - no `schedule`-triggered run had yet landed and passed the
-   new gate. The target schedule was also moved same-day from 8am/2pm to
-   9am/7pm (see "Same-day follow-up" above) specifically so an evening
-   firing would land the same night, giving a same-day chance to confirm
-   this. Check Actions history for `event: schedule` runs where `Run
-   pipeline` shows `conclusion: success` (not `skipped`), landing at
-   plausible times within the widened windows (07:00-14:59 / 15:00-23:59
-   Europe/London), one per window per day (the dedup check should prevent
-   a second one in the same window).
-2. GitHub's own `schedule` cron trigger's *timing* is **understood but not
-   fixable from this repo's side** - it's GitHub-platform behavior, not a
-   config bug (confirmed: correct default branch, valid YAML, active
-   workflow state, and it still fires at unpredictable times, sometimes
-   hours late). The 2026-08-06 fix works around this rather than fixing it:
-   it no longer requires GitHub to fire at a precise minute, only *within*
-   a several-hour window, which it has done reliably every day observed so
-   far. If GitHub ever stops firing the schedule trigger *at all* for an
-   entire day, that would be a new failure mode needing investigation (some
-   external nudge, but not a session-bound one - see the 2026-08-06 note
-   above for why that was ruled out).
-3. **Full emailed report visual check**: nobody has eyeballed the actual
-   emailed `.xlsx` from a real run since PR #4's tier-matching/colour fixes
-   merged, to confirm the "Equivalent St Mungo's room" column and the new
-   red-below/green-above colouring render as expected in Excel (not just in
-   the underlying data/tests). Quick to check: open the attachment from the
+1. **Still not confirmed: the widened gate has never been exercised by a
+   genuinely unattended `schedule`-triggered run on the current code.**
+   Checked at 23:21 UTC on 2026-08-06 (after the evening window had
+   closed): GitHub had not fired the workflow *at all* since 16:09 UTC,
+   spanning both new cron slots (18:05/19:05 UTC) and the full window - see
+   "2026-08-06 night" above for the full finding. The two runs that did
+   fire earlier that day both ran on stale code (pre-dating the 9am/7pm
+   change and the colour fix) and don't count. **Next step for whoever
+   picks this up**: check Actions history for any `schedule` run since
+   16:09 UTC on 2026-08-06 - if one has landed and `Run pipeline` shows
+   `conclusion: success` (not `skipped`), this item is resolved; if
+   GitHub still hasn't fired at all across another full window (e.g.
+   tomorrow's 9am slot also no-shows), treat that as confirmation of item
+   2 below rather than a fluke, and raise it with Mark directly.
+2. **GitHub's `schedule` trigger may not just be mistimed - it may
+   sometimes not fire at all.** Previously understood as unpredictable
+   *timing* (hours late but eventually firing); the night of 2026-08-06
+   was the first time an entire target window closed with zero firings,
+   which is a materially worse failure mode than what the widened-gate fix
+   was designed to absorb (that fix only helps if GitHub fires *at some
+   point* in the window - it can't help if GitHub doesn't fire at all).
+   This is GitHub-platform behavior, not a config bug (confirmed: correct
+   default branch, valid YAML, active workflow state). If this repeats
+   across multiple windows, the widened-gate approach may not be
+   sufficient on its own and Mark may need to decide on a fallback (a
+   reminder to manually trigger, or revisiting some form of external
+   nudge that isn't session-bound - see the 2026-08-06 "send_later
+   abandoned" note above for why a chat-session-bound one was ruled out).
+3. **Unexplained**: the 16:09 UTC run on 2026-08-06 (run `31118808728`,
+   job `92674747743`) - run-level `conclusion: failure`, job-level
+   `conclusion: cancelled`, no `steps` array recorded, ran for ~15 minutes
+   before stopping, logs return HTTP 404 (likely expired by the time
+   anyone checked). Predates the current code, so it isn't evidence
+   against the 9am/7pm or colour-logic changes, but nobody has determined
+   what caused it. Low priority unless it recurs.
+4. **Full emailed report visual check**: nobody has eyeballed the actual
+   emailed `.xlsx` from a real run since the 2026-08-06 colour-convention
+   change, to confirm all four % columns ("vs last report", "vs baseline",
+   "vs St Mungo's") now consistently render red-for-negative/
+   green-for-positive in actual Excel (verified programmatically via
+   `build_excel()` + inspecting font colours, but nobody has opened a real
+   emailed attachment since). Quick to check: open the attachment from the
    next real send, or trigger manually and check
    `data/latest_comp_set.xlsx` as committed by the workflow.
-4. **Not started**: "Option B" from earlier discussion - a live workbook in
+5. **Not started**: "Option B" from earlier discussion - a live workbook in
    OneDrive updated in place via Microsoft Graph API, instead of a
    committed file per run. Only worth revisiting if Mark asks for it later;
    requires an Azure app registration, more setup than the current
    approach.
-5. **Watch for recurring sold-out swings**: if Canvas Silver/Platinum
+6. **Watch for recurring sold-out swings**: if Canvas Silver/Platinum
    en-suite (or any other room) stays sold out indefinitely or flickers
    in/out a lot, that's just real-world inventory - no code change needed
    unless Mark asks for different handling (e.g. a "days sold out" stat).
-6. **Watch the fresh baseline settle in.** Since `data/history.csv` was
+7. **Watch the fresh baseline settle in.** Since `data/history.csv` was
    just cleared, the next couple of runs will have no "vs last report" or
    meaningful "vs baseline" figures yet (nothing to compare against) - this
    is expected, not a bug, until at least 2 runs have landed post-clear.
