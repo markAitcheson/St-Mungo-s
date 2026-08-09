@@ -34,6 +34,14 @@ def _money(v):
     return "" if v is None else f"£{v:.2f}"
 
 
+def _dash_pct(v):
+    return "" if v is None else f"{round(v):+d}%"
+
+
+def _dash_money(v):
+    return "" if v is None else f"£{round(v)}"
+
+
 def _short_ts(ts: str) -> str:
     return ts[:16].replace("T", " ") if ts else ts
 
@@ -65,10 +73,10 @@ def _room_summary(comparison: list[dict]) -> list[dict]:
         rows.append({
             "room_type": room_type,
             "category": r["category"],
-            "our_price": r["price_pw"],
-            "comp_min": min(prices) if prices else None,
-            "comp_avg": (sum(prices) / len(prices)) if prices else None,
-            "comp_max": max(prices) if prices else None,
+            "our_price": round(r["price_pw"]),
+            "comp_min": round(min(prices)) if prices else None,
+            "comp_avg": round(sum(prices) / len(prices)) if prices else None,
+            "comp_max": round(max(prices)) if prices else None,
             "comp_count": len(prices),
         })
     rows.sort(key=lambda x: (x["category"], x["our_price"]))
@@ -92,8 +100,8 @@ def _trend_summary(history: list[dict]) -> list[dict]:
         b = by_ts[ts]
         rows.append({
             "run_ts": ts,
-            "own_avg": (sum(b["own"]) / len(b["own"])) if b["own"] else None,
-            "comp_avg": (sum(b["comp"]) / len(b["comp"])) if b["comp"] else None,
+            "own_avg": round(sum(b["own"]) / len(b["own"])) if b["own"] else None,
+            "comp_avg": round(sum(b["comp"]) / len(b["comp"])) if b["comp"] else None,
         })
     return rows
 
@@ -109,8 +117,7 @@ def _dashboard_kpis(comparison: list[dict]) -> dict:
         "competitors_tracked": len(competitor_props),
         "avg_vs_own": avg_vs_own,
         "cheapest": min(priced, key=lambda r: r["price_pw"], default=None),
-        "priciest": max(priced, key=lambda r: r["price_pw"], default=None),
-        "sold_out_count": len(competitor_rooms) - len(priced),
+        "most_expensive": max(priced, key=lambda r: r["price_pw"], default=None),
     }
 
 
@@ -119,25 +126,24 @@ def _build_dashboard(wb: Workbook, comparison: list[dict], history: list[dict]) 
 
     ws["A1"] = "St Mungo's Comp Set Dashboard"
     ws["A1"].font = DASHBOARD_TITLE_FONT
-    ws.merge_cells("A1:F1")
+    ws.merge_cells("A1:E1")
 
     latest_ts = max((r["run_ts"] for r in comparison), default=None)
     ws["A2"] = f"Latest run: {_short_ts(latest_ts)}" if latest_ts else "No data yet"
     ws["A2"].font = DASHBOARD_SUBTITLE_FONT
-    ws.merge_cells("A2:F2")
+    ws.merge_cells("A2:E2")
 
     kpis = _dashboard_kpis(comparison)
 
     def _room_label(r):
-        return f"{r['property_name']} - {r['room_type']} ({_money(r['price_pw'])})" if r else "-"
+        return f"{r['property_name']} - {r['room_type']} ({_dash_money(r['price_pw'])})" if r else "-"
 
     kpi_cards = [
         ("Rooms tracked", str(kpis["rooms_tracked"])),
         ("Competitors tracked", str(kpis["competitors_tracked"])),
-        ("Avg competitor price vs us", _pct(kpis["avg_vs_own"]) or "-"),
+        ("Avg competitor price vs us", _dash_pct(kpis["avg_vs_own"]) or "-"),
         ("Cheapest competitor room", _room_label(kpis["cheapest"])),
-        ("Priciest competitor room", _room_label(kpis["priciest"])),
-        ("Sold-out competitor rooms", str(kpis["sold_out_count"])),
+        ("Most expensive competitor room", _room_label(kpis["most_expensive"])),
     ]
     for col, (label, value) in enumerate(kpi_cards, start=1):
         c1 = ws.cell(row=4, column=col, value=label)
