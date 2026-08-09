@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart import BarChart, Reference
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -83,29 +83,6 @@ def _room_summary(comparison: list[dict]) -> list[dict]:
     return rows
 
 
-def _trend_summary(history: list[dict]) -> list[dict]:
-    """One row per run timestamp: the average own price and average
-    competitor price that run, across every room with a recorded price.
-    Feeds the Dashboard's trend line chart."""
-    by_ts = defaultdict(lambda: {"own": [], "comp": []})
-    for r in history:
-        price = r.get("price_pw")
-        if not price:
-            continue
-        bucket = by_ts[r["run_ts"]]
-        bucket["own" if r.get("is_own") == "True" else "comp"].append(float(price))
-
-    rows = []
-    for ts in sorted(by_ts):
-        b = by_ts[ts]
-        rows.append({
-            "run_ts": ts,
-            "own_avg": round(sum(b["own"]) / len(b["own"])) if b["own"] else None,
-            "comp_avg": round(sum(b["comp"]) / len(b["comp"])) if b["comp"] else None,
-        })
-    return rows
-
-
 def _dashboard_kpis(comparison: list[dict]) -> dict:
     competitor_rooms = [r for r in comparison if not r["is_own"]]
     competitor_props = {r["property_name"] for r in competitor_rooms}
@@ -121,7 +98,7 @@ def _dashboard_kpis(comparison: list[dict]) -> dict:
     }
 
 
-def _build_dashboard(wb: Workbook, comparison: list[dict], history: list[dict]) -> None:
+def _build_dashboard(wb: Workbook, comparison: list[dict]) -> None:
     ws = wb.create_sheet("Dashboard", 0)
 
     ws["A1"] = "St Mungo's Comp Set Dashboard"
@@ -192,40 +169,6 @@ def _build_dashboard(wb: Workbook, comparison: list[dict], history: list[dict]) 
         bar.series[1].graphicalProperties.solidFill = COMPETITOR_COLOR
         ws.add_chart(bar, "G4")
 
-    # --- Trend table + line chart -------------------------------------------
-    trend_rows = _trend_summary(history)
-    trend_header_row = room_last_row + 3
-    ws.cell(row=trend_header_row - 1, column=1,
-            value="Price trend over time (source data for the chart to the right)").font = DASHBOARD_NOTE_FONT
-    trend_headers = ["Run", "Our avg price", "Competitor avg price"]
-    for col, h in enumerate(trend_headers, start=1):
-        ws.cell(row=trend_header_row, column=col, value=h)
-    _style_header(ws, row=trend_header_row)
-    for i, row in enumerate(trend_rows, start=trend_header_row + 1):
-        ws.cell(row=i, column=1, value=_short_ts(row["run_ts"]))
-        ws.cell(row=i, column=2, value=row["own_avg"])
-        ws.cell(row=i, column=3, value=row["comp_avg"])
-    trend_last_row = trend_header_row + len(trend_rows)
-
-    if trend_rows:
-        line = LineChart()
-        line.title = "Average price trend over time"
-        line.y_axis.title = "£ per week"
-        line.x_axis.title = "Run"
-        line.height = 9
-        line.width = 24
-        data = Reference(ws, min_col=2, max_col=3, min_row=trend_header_row, max_row=trend_last_row)
-        cats = Reference(ws, min_col=1, min_row=trend_header_row + 1, max_row=trend_last_row)
-        line.add_data(data, titles_from_data=True)
-        line.set_categories(cats)
-        line.series[0].graphicalProperties.line.solidFill = OWN_COLOR
-        line.series[0].graphicalProperties.line.width = 20000
-        line.series[0].smooth = False
-        line.series[1].graphicalProperties.line.solidFill = COMPETITOR_COLOR
-        line.series[1].graphicalProperties.line.width = 20000
-        line.series[1].smooth = False
-        ws.add_chart(line, "G23")
-
     for col in ("A", "B", "C", "D", "E"):
         if ws.column_dimensions[col].width is None or ws.column_dimensions[col].width < 16:
             ws.column_dimensions[col].width = 16
@@ -285,7 +228,7 @@ def build_excel(comparison: list[dict], history: list[dict], path) -> None:
             ws2.column_dimensions[get_column_letter(i)].width = 20
         ws2.freeze_panes = "A2"
 
-    _build_dashboard(wb, comparison, history)
+    _build_dashboard(wb, comparison)
     wb.active = 0  # Dashboard opens by default when the file is opened
 
     path = Path(path)
