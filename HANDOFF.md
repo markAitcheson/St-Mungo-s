@@ -191,6 +191,50 @@ clean twice-daily sends since says otherwise. Keep half an eye out
 regardless (see item 2 below), but this no longer needs active
 babysitting.
 
+**2026-08-09/12: Added a "Dashboard" sheet to the report (PR #5, merged
+2026-08-12).** Mark asked for "a quick visual representation of the data" as
+an Excel dashboard page. Built in `scraper/report_excel.py`: a new
+`Dashboard` sheet, first/active tab in the workbook, with 5 KPI cards (rooms
+tracked, competitors tracked, average competitor price vs ours, cheapest
+competitor room, most expensive competitor room) and a native Excel
+clustered bar chart comparing our price to the average competitor price per
+St Mungo's room tier - backed by a small on-sheet data table so it's a real
+live chart, not a static image. A trend-over-time line chart was built
+first, then deliberately removed at Mark's explicit request ("we don't need
+the history tracking on the dashboard page as we have a tab for that") - the
+existing "History" sheet already covers that, so the Dashboard stays a
+single-glance snapshot rather than duplicating it. All Dashboard numbers are
+rounded to whole £/% via dedicated `_dash_pct`/`_dash_money` helpers (added
+specifically so this rounding doesn't leak into the "Latest comp
+set"/"History" sheets, which keep their existing decimal precision
+unchanged). PR #5 merged into default on 2026-08-12; confirmed live in the
+very next scheduled run's committed `data/latest_comp_set.xlsx`
+(2026-08-12T09:15:17Z run - `Dashboard` sheet present and active, not just
+built locally). No changes to `run_pipeline.py`, the scrapers, the email
+step, or the workflow were needed - `build_excel()`'s signature is
+unchanged, so this only affects the generated `.xlsx`'s contents.
+
+**2026-08-10: pushed a diagnostic confirming ~6 days of unchanged prices
+across the comp set is real, not a scraper bug.** Mark asked why the report
+showed 0% "vs last report"/"vs baseline" for nearly every room. Checked
+`data/history.csv`'s git history first: it was never truncated, each
+scheduled run only appends (confirmed via `git show --stat` on recent
+commits) - the last genuine baseline clear was the intentional one on
+2026-08-04, nothing since. Then checked the actual price series: nearly
+every room had reported the *exact same price on every single scrape* since
+that Aug 4 clear (6 days, 14 runs). The one exception, Canvas Bronze
+En-suite, fluctuated (£162→£160→£157→...) over the week and happened to land
+back on exactly £162 - its original baseline - for the two most recent runs,
+which is why it also read 0% right when Mark looked. To rule out a
+scraper/caching bug rather than genuinely static competitor pricing, pushed
+a throwaway diagnostic (`scraper/_diag_static_prices.py` +
+`.github/workflows/_diag-static-prices.yml`, the standard push/trigger/revert
+pattern - see "Environment quirk" below) that re-scrapes all 4 sites live
+right now and diffs against the last committed history row: **0 of 31 rooms
+differed**. Confirms the pricing genuinely hasn't moved, not a bug. Diagnostic
+files reverted immediately after (commit `4c0b50e`) - nothing left on
+default.
+
 See "Outstanding / not yet done" for what's actually still open.
 
 ## Decisions already made (don't re-litigate these without reason)
@@ -268,6 +312,21 @@ Also: raw.githubusercontent.com is CDN-cached for a few minutes - when
 checking freshly-pushed file contents, fetch via
 `api.github.com/repos/.../contents/<path>?ref=<commit-sha>` (base64-decoded)
 instead, or you'll read stale data.
+
+**2026-08-09/10: `subscribe_pr_activity` and `send_later` (both Claude Code
+Remote MCP tools, unrelated to this repo's own code) failed persistently in
+one session** with `MCP error -32003: MCP tool call requires approval`,
+repeatedly, even after Mark approved via the chat-side button multiple times
+and across a worker-process restart. Root cause undetermined - looked like a
+broken approval-plumbing path specific to that session, not something
+retrying fixed. Worked around by polling PR state on demand with
+`mcp__github__pull_request_read` (methods `get`/`get_comments`/`get_status`)
+instead of a live webhook subscription, and merging PR #5 manually once Mark
+confirmed he was happy with it rather than relying on an automated watch. If
+this recurs in a fresh session: don't loop retrying the same call more than
+once or twice - fall back to manual `pull_request_read` polling and tell
+Mark live PR-watching isn't currently available, rather than silently doing
+nothing or fabricating a "watching" status.
 
 ## Automated triggering mechanism (read this before touching scheduling)
 
@@ -353,7 +412,7 @@ scraper/
   config.py        PROPERTIES list: each competitor's id/name/url/parser key
   scrape.py         One parser function per site (Playwright), scrape_all() orchestrates
   compare.py        History CSV read/write + build_comparison() (the %Δ math)
-  report_excel.py   Builds the .xlsx (Latest comp set + History sheets)
+  report_excel.py   Builds the .xlsx (Dashboard + Latest comp set + History sheets)
   send_email.py     smtplib SMTP_SSL send via Gmail app password
 run_pipeline.py      Entry point: scrape -> append history -> build xlsx -> email
 requirements.txt     playwright, openpyxl
@@ -488,6 +547,34 @@ guessed) - see below.
   no-price row - the parser found nothing at all for that tier) still just
   drop out of that run's comparison, since there's nothing to show.
 
+## Dashboard sheet internals (scraper/report_excel.py)
+
+- `_build_dashboard(wb, comparison)` creates the `Dashboard` sheet at index 0
+  (`wb.create_sheet("Dashboard", 0)`) and `build_excel()` sets
+  `wb.active = 0` so it's the tab Excel opens on. It only takes `comparison`
+  (the latest-run rows from `build_comparison()`), not `history` - the
+  trend/history chart was removed, see "Current status" above.
+- `_dashboard_kpis(comparison)` computes the 5 KPI card values: rooms
+  tracked, distinct competitor properties, the average of every matched
+  `vs_own_pct` across competitor rooms, and the single cheapest/most
+  expensive priced competitor room (by `min`/`max` on `price_pw`). Rendered
+  as label/value cell pairs in row 4/5, columns A-E.
+- `_room_summary(comparison)` builds the small table (rows 8+) that backs
+  the bar chart: one row per St Mungo's room type with a recorded price,
+  alongside the min/avg/max of whichever competitor rooms map to it via
+  `ROOM_EQUIVALENCE` (see "How the comparison math works" above) - reuses
+  `equivalent_room` off each comparison row rather than re-deriving the
+  mapping. The bar chart (`openpyxl.chart.BarChart`, anchored at `G4`)
+  references this table live via `Reference(...)`, so it's a real editable
+  Excel chart, not a pasted image.
+- `_dash_pct`/`_dash_money` are Dashboard-only rounding helpers (round to
+  whole £/whole %) - kept separate from `_pct`/`_money` (used by "Latest
+  comp set") deliberately, so a future request to change Dashboard rounding
+  again doesn't have to touch the other sheet's formatting.
+- If Mark asks for the Dashboard to show something new, extend
+  `_room_summary`/`_dashboard_kpis`/`_build_dashboard` - don't duplicate the
+  equivalence/aggregation logic that already lives in `compare.py`.
+
 ## Outstanding / not yet done
 
 1. ~~Confirm the widened gate lets a genuinely unattended `schedule`-run
@@ -541,6 +628,22 @@ guessed) - see below.
    just cleared, the next couple of runs will have no "vs last report" or
    meaningful "vs baseline" figures yet (nothing to compare against) - this
    is expected, not a bug, until at least 2 runs have landed post-clear.
+8. **Dashboard sheet: real emailed attachment hasn't been visually
+   eyeballed by Mark yet.** Preview `.xlsx` files sent to him during PR #5's
+   review were built from real repo data and structurally verified
+   (`openpyxl.load_workbook` round-trip on the charts/cells), and the sheet
+   is confirmed present in the actual committed `data/latest_comp_set.xlsx`
+   from the first post-merge scheduled run (2026-08-12T09:15:17Z) - but
+   nobody has confirmed it *looks* right (KPI card wrapping, chart legend
+   placement, readability) in Excel/Outlook from a real emailed attachment.
+   Low priority since Mark approved the preview files during review; only
+   worth chasing if he flags something looks off.
+9. **`subscribe_pr_activity`/`send_later` MCP failure (2026-08-09/10) is
+   unresolved, cause unknown.** See "Environment quirk worth knowing" above
+   for the full symptom and the polling workaround used instead. If a fresh
+   session hits the same `MCP error -32003` on those tools, don't assume
+   it's fixed - verify with one retry, then fall back to manual
+   `pull_request_read` polling rather than looping.
 
 ## Useful commands for resuming
 
