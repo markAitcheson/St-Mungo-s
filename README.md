@@ -110,6 +110,15 @@ exact match.
 - **Spreadsheet** (`data/latest_comp_set.xlsx`, also committed into the
   repo's `data/` folder each run so you always have the latest version
   there too):
+  - **"Dashboard" sheet** - opens first when you open the file. A quick
+    visual read of the same data: five summary numbers at the top (rooms
+    tracked, competitors tracked, average competitor price vs ours,
+    cheapest/most expensive competitor room), and a bar chart comparing our
+    price to the average competitor price for each of our room tiers. The
+    small table below the chart is what feeds it - normal Excel cells, so
+    you can click into it or rebuild the chart yourself if you want to
+    slice the data differently. For price trends over time, see the
+    "History" sheet.
   - **"Latest comp set" sheet** - every room type at every property, its
     current price, current offer, % change vs the last report (red = went
     up, green = went down), % change vs the very first price ever recorded,
